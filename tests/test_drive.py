@@ -248,7 +248,7 @@ def main():
     p = subprocess.run([sys.executable, "-m", "colab_cli_mcp.drive_cli", "status"], capture_output=True, text=True, cwd=ROOT)
     check("drive_cli status runs and prints no secrets", p.returncode == 0 and "refresh_token" not in p.stdout, p.stdout + p.stderr)
     p = subprocess.run([sys.executable, "-m", "colab_cli_mcp.drive_cli", "login"], capture_output=True, text=True, cwd=ROOT, env={**os.environ, "COLAB_MCP_DRIVE_CLIENT": str(tmp / "nope.json")})
-    check("login without any client explains what to do", p.returncode == 1 and "No OAuth client found" in p.stdout, p.stdout + p.stderr)
+    check("login without a terminal or a flag explains what to do", p.returncode == 1 and "--own or --shared" in p.stdout, p.stdout + p.stderr)
     own = tmp / "own.json"
     own.write_text("{}")
     shipped = drive.bundled_client_path()
@@ -271,6 +271,37 @@ def main():
         os.environ.pop("COLAB_MCP_DRIVE_CLIENT")
         if not had:
             shipped.unlink()
+    # interactive menu (stdin/input patched)
+    import builtins
+    def ask(answers, found_own=True):
+        it = iter(answers)
+        orig_in, orig_tty = builtins.input, drive_cli.sys.stdin.isatty
+        builtins.input = lambda *_a: next(it)
+        drive_cli.sys.stdin.isatty = lambda: True
+        try:
+            return drive_cli.choose_client([])
+        finally:
+            builtins.input, drive_cli.sys.stdin.isatty = orig_in, orig_tty
+    os.environ["COLAB_MCP_DRIVE_CLIENT"] = str(tmp / "cfg2" / "client_secret.json")
+    shipped_existed = shipped.exists()
+    if shipped_existed:
+        shipped.unlink()
+    check("menu: choosing shared when none is shipped is refused, then quit", ask(["1", "q"]) is None)
+    dl = tmp / "descargado.json"
+    dl.write_text(json.dumps({"installed": {"client_id": "x", "client_secret": "y"}}))
+    got = ask(["2", str(dl)])
+    check("menu: own -> imports the downloaded JSON with 0600", got == tmp / "cfg2" / "client_secret.json" and stat.S_IMODE(got.stat().st_mode) == 0o600, str(got))
+    web = tmp / "web.json"
+    web.write_text(json.dumps({"web": {}}))
+    os.environ["COLAB_MCP_DRIVE_CLIENT"] = str(tmp / "cfg3" / "client_secret.json")
+    check("menu: a non-Desktop client JSON is rejected", ask(["2", str(web)]) is None and not (tmp / "cfg3" / "client_secret.json").exists())
+    check("menu: Enter cancels the own import", ask(["2", ""]) is None)
+    shipped.write_text("{}")
+    check("menu: shared works when shipped", ask(["1"]) == shipped)
+    shipped.unlink()
+    if shipped_existed:
+        shipped.write_text("{}")
+    os.environ.pop("COLAB_MCP_DRIVE_CLIENT")
     check("no shared client is shipped by default", not drive.bundled_client_path().exists())
 
     # ---- MCP surface
