@@ -30,10 +30,12 @@ def login() -> int:
     _need_google()
     from google_auth_oauthlib.flow import InstalledAppFlow
 
-    client = drive.client_path()
-    if not client.exists():
-        print(f"Client file not found: {client}\n" + USAGE.format(client=client))
+    client, which = drive.active_client()
+    if client is None:
+        print(f"No OAuth client found.\n" + USAGE.format(client=drive.client_path()))
+        print("(Or use a package that ships a shared client.)")
         return 1
+    print(f"Using {which}: {client}")
     try:
         data = json.loads(client.read_text(encoding="utf-8"))
     except ValueError:
@@ -83,7 +85,8 @@ def logout() -> int:
 
 def status() -> int:
     tp = drive.token_path()
-    print(f"client file : {drive.client_path()} ({'found' if drive.client_path().exists() else 'MISSING'})")
+    client, which = drive.active_client()
+    print(f"client      : {which + ' - ' + str(client) if client else 'NONE (see README, Google Drive setup)'}")
     print(f"token file  : {tp} ({'found' if tp.exists() else 'not signed in'})")
     if tp.exists():
         try:

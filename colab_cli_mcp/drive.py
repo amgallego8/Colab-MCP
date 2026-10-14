@@ -63,6 +63,22 @@ def client_path() -> Path:
     return Path(os.environ.get("COLAB_MCP_DRIVE_CLIENT") or config_dir() / "client_secret.json")
 
 
+def bundled_client_path() -> Path:
+    """Optional OAuth client shipped by the maintainer (absent unless they publish one)."""
+    return Path(__file__).with_name("shared_client.json")
+
+
+def active_client() -> tuple[Path | None, str]:
+    """The user's own client wins; otherwise the shipped one, if any."""
+    own = client_path()
+    if own.exists():
+        return own, "your own client"
+    shipped = bundled_client_path()
+    if shipped.exists():
+        return shipped, "the shared client shipped with this package"
+    return None, ""
+
+
 def token_path() -> Path:
     return Path(os.environ.get("COLAB_MCP_DRIVE_TOKEN") or config_dir() / "token.json")
 

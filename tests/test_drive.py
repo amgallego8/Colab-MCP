@@ -248,7 +248,25 @@ def main():
     p = subprocess.run([sys.executable, "-m", "colab_cli_mcp.drive_cli", "status"], capture_output=True, text=True, cwd=ROOT)
     check("drive_cli status runs and prints no secrets", p.returncode == 0 and "refresh_token" not in p.stdout, p.stdout + p.stderr)
     p = subprocess.run([sys.executable, "-m", "colab_cli_mcp.drive_cli", "login"], capture_output=True, text=True, cwd=ROOT, env={**os.environ, "COLAB_MCP_DRIVE_CLIENT": str(tmp / "nope.json")})
-    check("login without a client file explains what to do", p.returncode == 1 and "Client file not found" in p.stdout, p.stdout + p.stderr)
+    check("login without any client explains what to do", p.returncode == 1 and "No OAuth client found" in p.stdout, p.stdout + p.stderr)
+    own = tmp / "own.json"
+    own.write_text("{}")
+    os.environ["COLAB_MCP_DRIVE_CLIENT"] = str(tmp / "nope.json")
+    shipped = drive.bundled_client_path()
+    had = shipped.exists()
+    if not had:
+        shipped.write_text("{}")
+    try:
+        c, w = drive.active_client()
+        check("with no own client the shipped one is used", c == shipped and "shared" in w, str((c, w)))
+        os.environ["COLAB_MCP_DRIVE_CLIENT"] = str(own)
+        c, w = drive.active_client()
+        check("the user's own client wins over the shipped one", c == own and "own" in w, str((c, w)))
+    finally:
+        os.environ.pop("COLAB_MCP_DRIVE_CLIENT")
+        if not had:
+            shipped.unlink()
+    check("no shared client is shipped by default", not drive.bundled_client_path().exists())
 
     # ---- MCP surface
     surface = asyncio.run(mcp_surface(tmp))

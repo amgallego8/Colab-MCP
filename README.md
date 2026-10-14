@@ -55,6 +55,11 @@ A skill that keeps the agent to exactly this lives in [`skills/colab-drive-noteb
 
 Nobody shares credentials. **Each user creates their own Google Cloud project and OAuth client, signs in themselves in a terminal, and owns the token on their own disk.** This project ships no client ID, no secret and no hosted service. The model never sees a sign-in link, code or token: login is a terminal command, not a tool.
 
+### Two ways to get an OAuth client
+
+- **Your own (default, recommended):** follow *Setup* below. You own the Google project and answer for it.
+- **Shared:** if a build of this package ships `colab_cli_mcp/shared_client.json` (this repository does not, until the maintainer creates and publishes one), `login` uses it when you have no client of your own, and you can skip steps 1–3. The sign-in, the `drive.file` scope, the token file and every guardrail are identical; only the owner of the Google project differs, and that owner (not you) answers to Google for it. Your own `client_secret.json` always takes priority.
+
 ### Setup (once per user)
 
 1. In the [Google Cloud console](https://console.cloud.google.com/) create a project (or pick one of yours) and enable the **Google Drive API** (see Google's [Enable Google Workspace APIs](https://developers.google.com/workspace/guides/enable-apis) guide).
