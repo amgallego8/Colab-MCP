@@ -109,6 +109,8 @@ Env: `COLAB_MCP_DRIVE` (enable), `COLAB_MCP_DRIVE_DIR` (default `~/.config/colab
 
 ## Install
 
+**Fastest:** `bash install.sh` (macOS/Linux). It asks before installing anything, signs you in to Colab, and registers the server with Claude Code (or prints the Claude Desktop config). The manual steps are below.
+
 ```bash
 # 1. uv and the official CLI
 curl -LsSf https://astral.sh/uv/install.sh | sh
