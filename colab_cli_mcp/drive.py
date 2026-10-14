@@ -68,15 +68,14 @@ def bundled_client_path() -> Path:
     return Path(__file__).with_name("shared_client.json")
 
 
-def active_client() -> tuple[Path | None, str]:
-    """The user's own client wins; otherwise the shipped one, if any."""
-    own = client_path()
-    if own.exists():
-        return own, "your own client"
-    shipped = bundled_client_path()
-    if shipped.exists():
-        return shipped, "the shared client shipped with this package"
-    return None, ""
+def available_clients() -> dict[str, Path]:
+    """Clients that exist right now: 'own' (the user's file) and/or 'shared' (shipped by the maintainer)."""
+    found = {}
+    if client_path().exists():
+        found["own"] = client_path()
+    if bundled_client_path().exists():
+        found["shared"] = bundled_client_path()
+    return found
 
 
 def token_path() -> Path:

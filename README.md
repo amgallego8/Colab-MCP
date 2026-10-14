@@ -58,7 +58,7 @@ Nobody shares credentials. **Each user creates their own Google Cloud project an
 ### Two ways to get an OAuth client
 
 - **Your own (default, recommended):** follow *Setup* below. You own the Google project and answer for it.
-- **Shared:** if a build of this package ships `colab_cli_mcp/shared_client.json` (this repository does not, until the maintainer creates and publishes one), `login` uses it when you have no client of your own, and you can skip steps 1–3. The sign-in, the `drive.file` scope, the token file and every guardrail are identical; only the owner of the Google project differs, and that owner (not you) answers to Google for it. Your own `client_secret.json` always takes priority.
+- **Shared:** if a build of this package ships `colab_cli_mcp/shared_client.json` (this repository does not, until the maintainer creates and publishes one), `login` offers it and asks you to choose (it is never used without an explicit choice: a typed answer or `--shared`), and you can skip steps 1–3. The sign-in, the `drive.file` scope, the token file and every guardrail are identical; only the owner of the Google project differs, and that owner (not you) answers to Google for it. Non-interactive use needs `--own` or `--shared`.
 
 ### Setup (once per user)
 

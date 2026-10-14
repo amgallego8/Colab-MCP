@@ -1,4 +1,4 @@
-"""Terminal commands for Drive sign-in: `colab-cli-mcp-drive login | logout | status`.
+"""Terminal commands for Drive sign-in: `colab-cli-mcp-drive login [--own|--shared] | logout | status`.
 
 Run by the HUMAN in a terminal. It is deliberately not an MCP tool: the model must never see
 the consent link, the authorization code or the token.
@@ -10,7 +10,7 @@ import sys
 from . import drive
 from .core import ToolError
 
-USAGE = """colab-cli-mcp-drive login | logout | status
+USAGE = """colab-cli-mcp-drive login [--own|--shared] | logout | status
 
 Before the first login you need your OWN OAuth client (see README, "Google Drive setup"):
 save the downloaded Desktop-app client JSON as
@@ -26,16 +26,55 @@ def _need_google():
         sys.exit("Missing packages. Install with:  pip install 'colab-cli-mcp[drive]'   (or: uv sync --extra drive)")
 
 
+EXPLAIN = """Which Google OAuth client do you want to sign in with?
+
+  own    - the one YOU created in your own Google Cloud project ({own}).
+           You own the project and answer to Google for it. Recommended.
+  shared - the one shipped with this package by its maintainer.
+           Nothing to set up, but the maintainer's project is the app Google shows you.
+           Sign-in, scope (drive.file only), token and guardrails are the same either way.
+"""
+
+
+def choose_client(flags: list[str]):
+    """Never use the shared client without an explicit choice (flag or typed answer)."""
+    found = drive.available_clients()
+    want = "own" if "--own" in flags else "shared" if "--shared" in flags else None
+    if "--own" in flags and "--shared" in flags:
+        print("Choose one of --own or --shared.")
+        return None
+    if want:
+        if want not in found:
+            print(f"The {want} client is not available." + (f" Expected {drive.client_path()}" if want == "own" else " This package does not ship one."))
+            return None
+        return found[want]
+    if not found:
+        print("No OAuth client found.\n" + USAGE.format(client=drive.client_path()))
+        return None
+    if not sys.stdin.isatty():
+        print("Not an interactive terminal: pass --own or --shared. Available: " + ", ".join(found))
+        return None
+    print(EXPLAIN.format(own=drive.client_path()))
+    if list(found) == ["own"]:
+        print("Using your own client.")
+        return found["own"]
+    options = " / ".join(found)
+    default = "own" if "own" in found else None
+    while True:
+        ans = input(f"Choose [{options}]{' (Enter = own)' if default else ''}: ").strip().lower() or (default or "")
+        if ans in found:
+            return found[ans]
+        if ans in {"q", "quit", "exit"}:
+            return None
+
+
 def login() -> int:
     _need_google()
     from google_auth_oauthlib.flow import InstalledAppFlow
 
-    client, which = drive.active_client()
+    client = choose_client(sys.argv[2:])
     if client is None:
-        print(f"No OAuth client found.\n" + USAGE.format(client=drive.client_path()))
-        print("(Or use a package that ships a shared client.)")
         return 1
-    print(f"Using {which}: {client}")
     try:
         data = json.loads(client.read_text(encoding="utf-8"))
     except ValueError:
@@ -85,8 +124,8 @@ def logout() -> int:
 
 def status() -> int:
     tp = drive.token_path()
-    client, which = drive.active_client()
-    print(f"client      : {which + ' - ' + str(client) if client else 'NONE (see README, Google Drive setup)'}")
+    found = drive.available_clients()
+    print("clients     : " + (", ".join(f"{k} ({v})" for k, v in found.items()) if found else "NONE (see README, Google Drive setup)"))
     print(f"token file  : {tp} ({'found' if tp.exists() else 'not signed in'})")
     if tp.exists():
         try:

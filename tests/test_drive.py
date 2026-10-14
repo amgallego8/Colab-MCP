@@ -251,17 +251,22 @@ def main():
     check("login without any client explains what to do", p.returncode == 1 and "No OAuth client found" in p.stdout, p.stdout + p.stderr)
     own = tmp / "own.json"
     own.write_text("{}")
-    os.environ["COLAB_MCP_DRIVE_CLIENT"] = str(tmp / "nope.json")
     shipped = drive.bundled_client_path()
     had = shipped.exists()
-    if not had:
-        shipped.write_text("{}")
+    from colab_cli_mcp import drive_cli
     try:
-        c, w = drive.active_client()
-        check("with no own client the shipped one is used", c == shipped and "shared" in w, str((c, w)))
+        os.environ["COLAB_MCP_DRIVE_CLIENT"] = str(tmp / "nope.json")
+        if not had:
+            shipped.write_text("{}")
+        check("only the shipped client: listed as 'shared'", list(drive.available_clients()) == ["shared"])
+        p = subprocess.run([sys.executable, "-m", "colab_cli_mcp.drive_cli", "login"], capture_output=True, text=True, cwd=ROOT, stdin=subprocess.DEVNULL, env=os.environ.copy())
+        check("shared client is never used silently without a terminal", p.returncode == 1 and "--own or --shared" in p.stdout, p.stdout + p.stderr)
+        check("--own without an own client is refused", drive_cli.choose_client(["--own"]) is None)
+        check("--shared picks the shipped client", drive_cli.choose_client(["--shared"]) == shipped)
+        check("both flags together are refused", drive_cli.choose_client(["--own", "--shared"]) is None)
         os.environ["COLAB_MCP_DRIVE_CLIENT"] = str(own)
-        c, w = drive.active_client()
-        check("the user's own client wins over the shipped one", c == own and "own" in w, str((c, w)))
+        check("both available: listed own and shared", list(drive.available_clients()) == ["own", "shared"])
+        check("--own picks the user's client", drive_cli.choose_client(["--own"]) == own)
     finally:
         os.environ.pop("COLAB_MCP_DRIVE_CLIENT")
         if not had:
