@@ -50,10 +50,20 @@ fi
 
 say "5/5  Connect to your AI client"
 CMD=(uv run --directory "$DIR" colab-cli-mcp)
-if have claude && ask "Register with Claude Code now?"; then
-  claude mcp add colab-cli -e COLAB_MCP_WORKDIR="$WORK" -- "${CMD[@]}"
+if have claude; then
+  if claude mcp get colab-cli >/dev/null 2>&1; then echo "Claude Code: already registered"
+  elif ask "Register with Claude Code (available in all your projects)?"; then
+    claude mcp add -s user colab-cli -e COLAB_MCP_WORKDIR="$WORK" -- "${CMD[@]}"
+  fi
+fi
+if [ "$(uname -s)" = Darwin ]; then DESKTOP_CFG="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+else DESKTOP_CFG="$HOME/.config/Claude/claude_desktop_config.json"; fi
+if [ -d "$(dirname "$DESKTOP_CFG")" ] && have python3; then
+  if ask "Register with the Claude desktop app too? (edits $DESKTOP_CFG, keeps a .bak backup)"; then
+    python3 "$DIR/scripts/register_desktop.py" "$DESKTOP_CFG" "$(command -v uv)" "$DIR" "$WORK"
+  fi
 else
-  echo "Claude Desktop: add this to claude_desktop_config.json under \"mcpServers\", then restart the app:"
+  echo "Claude Desktop: add this under \"mcpServers\" in claude_desktop_config.json, then restart the app:"
   cat <<JSON
     "colab-cli": {
       "command": "$(command -v uv)",
