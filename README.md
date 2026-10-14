@@ -191,6 +191,10 @@ python tests/test_drive.py    # the Drive tools, with a simulated Drive API
 
 The SDK pin `mcp<2` is intentional: 2.x renamed `FastMCP` to `MCPServer`.
 
+## Terms of use and privacy
+
+See [TERMS.md](TERMS.md): no server and no data collection by the maintainer, what is stored locally, user responsibilities, who answers to Google under each sign-in option, and the no-warranty clause.
+
 ## License
 
 Not chosen yet.

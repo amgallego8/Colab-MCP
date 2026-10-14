@@ -33,6 +33,9 @@ EXPLAIN = """Which Google OAuth client do you want to sign in with?
   shared - the one shipped with this package by its maintainer.
            Nothing to set up, but the maintainer's project is the app Google shows you.
            Sign-in, scope (drive.file only), token and guardrails are the same either way.
+
+Using this tool means accepting TERMS.md (https://github.com/amgallego8/Colab-MCP/blob/main/TERMS.md)
+and Google's own terms.
 """
 
 
