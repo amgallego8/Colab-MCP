@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+*.egg-info/
+
+# Secretos: nunca al repositorio
+.env
+*.env
+secretos*
