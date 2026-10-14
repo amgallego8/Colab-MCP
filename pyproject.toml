@@ -3,12 +3,18 @@ name = "colab-cli-mcp"
 version = "0.1.0"
 description = "Servidor MCP que envuelve el Colab CLI oficial (google-colab-cli) para ejecutar código en GPU desde un agente."
 readme = "README.md"
+license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 # El SDK 2.x renombró FastMCP a MCPServer; este servidor usa la API 1.x.
 dependencies = ["mcp>=1.2,<2", "nbformat>=5.9"]
 
+[project.optional-dependencies]
+# Only needed for the opt-in Google Drive tools.
+drive = ["google-auth>=2.20", "google-auth-oauthlib>=1.0", "requests>=2.31"]
+
 [project.scripts]
 colab-cli-mcp = "colab_cli_mcp.server:main"
+colab-cli-mcp-drive = "colab_cli_mcp.drive_cli:main"
 
 [build-system]
 requires = ["hatchling"]
