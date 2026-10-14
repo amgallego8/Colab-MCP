@@ -55,28 +55,34 @@ A skill that keeps the agent to exactly this lives in [`skills/colab-drive-noteb
 
 Nobody shares credentials. **Each user creates their own Google Cloud project and OAuth client, signs in themselves in a terminal, and owns the token on their own disk.** This project ships no client ID, no secret and no hosted service. The model never sees a sign-in link, code or token: login is a terminal command, not a tool.
 
-### Two ways to get an OAuth client
-
-- **Your own (default, recommended):** follow *Setup* below. You own the Google project and answer for it.
-- **Shared:** if a build of this package ships `colab_cli_mcp/shared_client.json` (this repository does not, until the maintainer creates and publishes one), `login` offers it and asks you to choose (it is never used without an explicit choice: a typed answer or `--shared`), and you can skip steps 1–3. The sign-in, the `drive.file` scope, the token file and every guardrail are identical; only the owner of the Google project differs, and that owner (not you) answers to Google for it. Non-interactive use needs `--own` or `--shared`.
-
-### Setup (once per user)
-
-1. In the [Google Cloud console](https://console.cloud.google.com/) create a project (or pick one of yours) and enable the **Google Drive API** (see Google's [Enable Google Workspace APIs](https://developers.google.com/workspace/guides/enable-apis) guide).
-2. Configure the OAuth consent screen / Google Auth Platform for your project ([guide](https://developers.google.com/workspace/guides/configure-oauth-consent)). Under **Audience** pick *External* and add yourself under *Test users*; under **Data Access → Add or Remove Scopes** add only `.../auth/drive.file`. This tool asks for that scope and nothing else at login.
-3. Go to **Google Auth platform → Clients → Create Client → Desktop app** ([Google's steps](https://developers.google.com/workspace/guides/create-credentials)). Download the JSON and save it as `~/.config/colab-mcp/drive/client_secret.json` with `chmod 600`.
-4. Install the extras and sign in:
+### Quick start (every user)
 
 ```bash
-uv sync --extra drive            # inside the cloned repo (or: pip install '.[drive]')
-uv run colab-cli-mcp-drive login # opens your browser; asks for drive.file only
-uv run colab-cli-mcp-drive status
+git clone https://github.com/amgallego8/Colab-MCP ~/Colab-MCP && cd ~/Colab-MCP
+uv sync                              # installs everything, Drive packages included
+uv run colab-cli-mcp-drive login     # asks how you want to sign in (below)
 ```
 
-5. Add `-e COLAB_MCP_DRIVE=1` to the MCP registration (Claude Desktop: `"COLAB_MCP_DRIVE": "1"` in `env`) and use `uv run --extra drive --directory ~/Colab-MCP colab-cli-mcp` as the command.
-6. Leave **per-call approval on** for `drive_notebook_delete` in your MCP client. That prompt is the real human confirmation; the server cannot force it.
+`login` shows a menu:
+
+1. **shared** — sign in with your browser, nothing to set up. It uses the OAuth client shipped in `colab_cli_mcp/shared_client.json`; the owner of that Google project (the maintainer) answers to Google for the app. Available only in builds that ship one (this repository does not yet).
+2. **own** — you create your own Google Cloud project and OAuth client; `login` walks you through it and, when you give it the path of the JSON you downloaded, stores it for you (`0600`). You answer to Google for your project.
+
+The shared client is never used without an explicit choice. Non-interactive use needs `--own` or `--shared`. Sign-in, the `drive.file` scope, the token file and every guardrail are identical in both cases.
+
+Then add `-e COLAB_MCP_DRIVE=1` to the MCP registration (Claude Desktop: `"COLAB_MCP_DRIVE": "1"` in `env`), and leave **per-call approval on** for `drive_notebook_delete` in your MCP client — that prompt is the real human confirmation; the server cannot force it. `uv run colab-cli-mcp-drive status` shows what is configured.
 
 To leave: `colab-cli-mcp-drive logout` (deletes the token and revokes it at Google), and remove the app at <https://myaccount.google.com/permissions> if revocation could not be confirmed.
+
+### Creating your own client by hand (option 2 in detail)
+
+1. In the [Google Cloud console](https://console.cloud.google.com/) create a project and enable the **Google Drive API** ([guide](https://developers.google.com/workspace/guides/enable-apis)).
+2. Configure the consent screen / Google Auth Platform ([guide](https://developers.google.com/workspace/guides/configure-oauth-consent)): under **Audience** pick *External* and add yourself under *Test users*; under **Data Access → Add or Remove Scopes** add only `.../auth/drive.file`.
+3. **Google Auth platform → Clients → Create Client → Desktop app** ([Google's steps](https://developers.google.com/workspace/guides/create-credentials)). Download the JSON and give its path to `login`.
+
+### For the maintainer: publishing a shared client
+
+Create the client as above (ideally in a dedicated Google account and project), then place the JSON at `colab_cli_mcp/shared_client.json` and commit it on purpose (`git add -f`; the file is git-ignored by default). Desktop-app client secrets are not confidential by design, but the project, its consent screen (support email, privacy policy link) and any Google verification requirements become yours. See [TERMS.md](TERMS.md).
 
 ### Threat model (what this does and does not protect)
 

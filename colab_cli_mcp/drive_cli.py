@@ -5,7 +5,9 @@ the consent link, the authorization code or the token.
 """
 
 import json
+import os
 import sys
+from pathlib import Path
 
 from . import drive
 from .core import ToolError
@@ -23,20 +25,51 @@ def _need_google():
         import google_auth_oauthlib.flow  # noqa: F401
         import requests  # noqa: F401
     except ImportError:
-        sys.exit("Missing packages. Install with:  pip install 'colab-cli-mcp[drive]'   (or: uv sync --extra drive)")
+        sys.exit("Missing packages. Reinstall the project (uv sync, or pip install .).")
 
 
-EXPLAIN = """Which Google OAuth client do you want to sign in with?
+MENU = """How do you want to sign in to Google Drive?
 
-  own    - the one YOU created in your own Google Cloud project ({own}).
-           You own the project and answer to Google for it. Recommended.
-  shared - the one shipped with this package by its maintainer.
-           Nothing to set up, but the maintainer's project is the app Google shows you.
-           Sign-in, scope (drive.file only), token and guardrails are the same either way.
+  1) shared - sign in with your browser. Nothing to set up.
+              Uses the OAuth client shipped with this package; its owner is the maintainer.{shared_note}
+  2) own    - create your own Google Cloud project and OAuth client (about 10 minutes).
+              You own the project and answer to Google for it.
 
+Either way: scope drive.file only, token stored only on this computer, same guardrails.
 Using this tool means accepting TERMS.md (https://github.com/amgallego8/Colab-MCP/blob/main/TERMS.md)
 and Google's own terms.
 """
+
+OWN_STEPS = """Create your own client (details: README, "Setup"):
+  1. https://console.cloud.google.com -> create a project -> enable "Google Drive API".
+  2. Google Auth platform -> Branding (name + support email) -> Audience: External + add yourself
+     as test user -> Data Access: add only the scope .../auth/drive.file
+  3. Google Auth platform -> Clients -> Create Client -> "Desktop app" -> download the JSON.
+"""
+
+
+def import_own_client():
+    """Copy a downloaded client JSON into place (0600) after validating it."""
+    print(OWN_STEPS)
+    raw = input("Path of the downloaded JSON (drag the file here; Enter to cancel): ").strip().strip("'\"")
+    if not raw:
+        return None
+    src = Path(raw).expanduser()
+    try:
+        data = json.loads(src.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        print("Could not read that file as JSON.")
+        return None
+    if "installed" not in data:
+        print('That client is not of type "Desktop app" (the JSON should start with {"installed": ...}).')
+        return None
+    dest = drive.client_path()
+    drive._private_dir(dest.parent)
+    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    print(f"Saved at {dest} (owner-only). You can delete the downloaded copy.")
+    return dest
 
 
 def choose_client(flags: list[str]):
@@ -51,24 +84,20 @@ def choose_client(flags: list[str]):
             print(f"The {want} client is not available." + (f" Expected {drive.client_path()}" if want == "own" else " This package does not ship one."))
             return None
         return found[want]
-    if not found:
-        print("No OAuth client found.\n" + USAGE.format(client=drive.client_path()))
-        return None
     if not sys.stdin.isatty():
-        print("Not an interactive terminal: pass --own or --shared. Available: " + ", ".join(found))
+        print("Not an interactive terminal: pass --own or --shared. Available: " + (", ".join(found) or "none"))
         return None
-    print(EXPLAIN.format(own=drive.client_path()))
-    if list(found) == ["own"]:
-        print("Using your own client.")
-        return found["own"]
-    options = " / ".join(found)
-    default = "own" if "own" in found else None
+    print(MENU.format(shared_note="" if "shared" in found else "\n              (NOT available in this build: the maintainer has not published one yet.)"))
     while True:
-        ans = input(f"Choose [{options}]{' (Enter = own)' if default else ''}: ").strip().lower() or (default or "")
-        if ans in found:
-            return found[ans]
+        ans = input("Choose 1 (shared) or 2 (own) [q to quit]: ").strip().lower()
         if ans in {"q", "quit", "exit"}:
             return None
+        if ans in {"1", "shared"}:
+            if "shared" in found:
+                return found["shared"]
+            print("This build ships no shared client. Choose 2, or ask the maintainer.")
+        elif ans in {"2", "own"}:
+            return found["own"] if "own" in found else import_own_client()
 
 
 def login() -> int:

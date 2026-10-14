@@ -216,7 +216,7 @@ def _real_session():
         from google.auth.transport.requests import AuthorizedSession, Request
         from google.oauth2.credentials import Credentials
     except ImportError:
-        raise ToolError("Drive support needs extra packages: pip install 'colab-cli-mcp[drive]' (or: uv sync --extra drive).") from None
+        raise ToolError("Drive support needs its Google packages: reinstall the project (uv sync, or pip install .).") from None
     tp = token_path()
     if not tp.exists():
         raise ToolError("Not signed in to Drive. In a terminal (not here) run: colab-cli-mcp-drive login")
