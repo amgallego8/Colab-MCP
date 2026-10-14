@@ -1,118 +1,143 @@
 # Colab-MCP
 
-Servidor MCP que envuelve el **Colab CLI oficial de Google** (`google-colab-cli`) para que un agente (Claude) pueda crear un runtime con GPU, subir archivos, ejecutar código, descargar resultados y detener la máquina.
+An MCP server that lets an AI agent (Claude, or any MCP client) **use Google Colab end to end**: create and stop GPU/TPU runtimes, run code, work in notebooks cell by cell, launch long background jobs, and move files and folders in and out of the VM.
 
-No reimplementa nada de Colab: cada herramienta ejecuta un comando de `colab`. No usa el MCP oficial de Colab (`googlecolab/colab-mcp`), que depende de una pestaña abierta del navegador y de que el cliente reciba herramientas dinámicas.
+It is a thin, safe layer over Google's official **Colab CLI** ([`google-colab-cli`](https://github.com/googlecolab/google-colab-cli)). It does not reimplement Colab and does not depend on a browser tab.
 
-## Estado
+> 🇪🇸 **Resumen en español al final de este archivo.**
 
-- Probado de extremo a extremo con un `colab` **simulado** (39 pruebas, `tests/`). El flujo MCP real (cliente por stdio) está cubierto.
-- **No probado todavía contra Colab real**: falta el primer inicio de sesión y una corrida real (ver «Primera corrida»).
-- Windows no está soportado por el CLI de Google (solo Linux y macOS).
+## Status
 
-## Herramientas
+- **Tested against a simulated CLI** (92 checks, `tests/`): a real MCP client talks to the server over stdio and the code that normally runs on the VM is executed for real in a sandbox folder.
+- **Not yet validated against live Colab.** Sign-in and a first real run are the next step; behaviours the CLI does not document (listed under *Known unknowns*) are flagged below.
+- Linux and macOS only (the Colab CLI does not support Windows).
 
-| Herramienta | Qué hace |
+## Tools (36)
+
+| Area | Tools |
 |---|---|
-| `colab_sessions`, `colab_status`, `colab_usage` | Sesiones activas, estado de una sesión, saldo de unidades de cómputo |
-| `colab_new` | Crea un runtime (CPU, `gpu` T4/L4/G4/H100/A100, `tpu` v5e1/v6e1, `high_mem`) |
-| `colab_install` | Instala paquetes en el runtime |
-| `colab_exec` | Ejecuta Python (`code` o `file` local) con `secrets` opcionales |
-| `colab_run` | Trabajo de una sola vez: máquina nueva, script, y la libera |
-| `colab_upload`, `colab_download`, `colab_ls`, `colab_rm` | Archivos del runtime |
-| `colab_log` | Historial de la sesión |
-| `colab_stop` | Detiene la sesión y libera la máquina |
+| **Runtimes** | `colab_new`, `colab_ensure_session`, `colab_sessions`, `colab_status`, `colab_runtime_info`, `colab_restart_kernel`, `colab_url`, `colab_usage`, `colab_stop`, `colab_install` |
+| **Run code** | `colab_exec` (code or file; kernel state persists between calls), `colab_run` (one-shot: fresh VM → script → release) |
+| **Notebooks** (local `.ipynb`) | `colab_notebook_create`, `_list`, `_read`, `_add_cell`, `_edit_cell`, `_delete_cell`, `_move_cell`, `_clear_outputs`, `_run_cell`, `_run_all`, `_to_script`, `_delete` |
+| **Long jobs** | `colab_job_start`, `_status`, `_logs`, `_cancel`, `_list` |
+| **Files** | `colab_upload`, `colab_download`, `colab_upload_dir`, `colab_download_dir`, `colab_ls`, `colab_rm`, `colab_log` |
 
-Deliberadamente **no** incluye iniciar sesión, `colab auth` ni `drivemount`: son flujos interactivos.
+Typical flows:
 
-## Seguridad
+- **Interactive:** `colab_ensure_session(gpu="T4")` → `colab_notebook_create` → add cells → `colab_notebook_run_cell` one by one (variables persist) → read outputs → `colab_stop`.
+- **Batch:** `colab_upload_dir` → `colab_job_start("python -u train.py")` → poll `colab_job_logs` → `colab_download_dir` → `colab_stop`.
 
-- **Rutas locales confinadas.** Subir, descargar y ejecutar archivos solo funciona dentro de `COLAB_MCP_WORKDIR`; `../`, rutas absolutas y enlaces simbólicos que salgan se rechazan.
-- **Secretos fuera del chat.** `COLAB_MCP_ENV_FILE` apunta a un archivo local `NOMBRE=valor`. El modelo solo conoce los nombres, pasa `secrets=["OPENROUTER_API_KEY"]`, y el valor se envía al kernel con `--env` y se **borra de toda salida**. Límite conocido: mientras corre el comando, el valor es visible en la lista de procesos de tu equipo (`ps`), porque el CLI lo recibe como argumento.
-- **Sin shell.** Los comandos se ejecutan con lista de argumentos; nombres de sesión, GPU y paquetes se validan.
-- **Recortes.** La salida se limita a `COLAB_MCP_MAX_OUTPUT` caracteres (20 000 por defecto).
-- Lo que ejecutes con `colab_exec` corre en máquinas de Google bajo tu cuenta y **consume unidades de cómputo**. Usa `colab_stop` al terminar.
+Deliberately **not** included: sign-in, `colab auth`, `colab drivemount`, `repl`, `console`, `ssh`, `edit`. They are interactive and cannot work through a tool call.
 
-## Instalación (macOS o Linux)
+## Security model
+
+- **Local paths are confined** to `COLAB_MCP_WORKDIR`. `../`, absolute paths and symlinks that escape are rejected before anything runs.
+- **Secrets never reach the model.** `COLAB_MCP_ENV_FILE` points to a local `NAME=value` file. The model only passes names (`secrets=["OPENROUTER_API_KEY"]`); values go to the kernel with `--env` and are scrubbed from every result. Known limit: while the command runs, the value is visible to other local users in the process list, because the CLI takes it as an argument.
+- **No shell.** The CLI is run with an argument list. Session names, GPU types, package specifiers and job ids are validated. Everything user-controlled that is embedded in code for the VM goes through `repr()`.
+- **Folder transfers are guarded.** Uploads skip `.git`, caches, symlinks and likely secrets (`.env`, `*.pem`, `*.key`…); downloads reject archives with paths that escape the target (zip-slip) or exceed a size limit.
+- **No hard deletes on your computer.** `colab_notebook_delete` moves the file to `.colab-mcp-trash/`. `colab_rm` only touches the VM and refuses root-like paths.
+- Output is clipped to `COLAB_MCP_MAX_OUTPUT` characters.
+- Code you run executes on Google's machines **under your account and spends your compute units**. Stop sessions you no longer need.
+
+## Install
 
 ```bash
-# 1. uv y el CLI oficial
+# 1. uv and the official CLI
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv tool install google-colab-cli
 
-# 2. Iniciar sesión UNA vez (flujo de copiar y pegar el código)
+# 2. Sign in ONCE (open the link, paste the code)
 colab sessions
 
-# 3. Este servidor
+# 3. This server
 git clone https://github.com/amgallego8/Colab-MCP ~/Colab-MCP
 ```
 
-Archivo de secretos (fuera de cualquier repositorio, solo tú puedes leerlo):
+Optional secrets file (outside any repository, readable only by you):
 
 ```bash
 mkdir -p ~/.config/colab-mcp
-printf 'OPENROUTER_API_KEY=pega-aquí-tu-clave\n' > ~/.config/colab-mcp/secretos.env
-chmod 600 ~/.config/colab-mcp/secretos.env
+printf 'OPENROUTER_API_KEY=your-key-here\n' > ~/.config/colab-mcp/secrets.env
+chmod 600 ~/.config/colab-mcp/secrets.env
 ```
 
-Registrar en **Claude Code**:
+Register in **Claude Code**:
 
 ```bash
 claude mcp add colab-cli \
   -e COLAB_MCP_WORKDIR="$HOME/colab-work" \
-  -e COLAB_MCP_ENV_FILE="$HOME/.config/colab-mcp/secretos.env" \
+  -e COLAB_MCP_ENV_FILE="$HOME/.config/colab-mcp/secrets.env" \
   -- uv run --directory ~/Colab-MCP colab-cli-mcp
 ```
 
-Registrar en **Claude Desktop** (`claude_desktop_config.json`):
+Register in **Claude Desktop** (`claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
     "colab-cli": {
       "command": "uv",
-      "args": ["run", "--directory", "/Users/TU_USUARIO/Colab-MCP", "colab-cli-mcp"],
+      "args": ["run", "--directory", "/Users/YOU/Colab-MCP", "colab-cli-mcp"],
       "env": {
-        "COLAB_MCP_WORKDIR": "/Users/TU_USUARIO/colab-work",
-        "COLAB_MCP_ENV_FILE": "/Users/TU_USUARIO/.config/colab-mcp/secretos.env"
+        "COLAB_MCP_WORKDIR": "/Users/YOU/colab-work",
+        "COLAB_MCP_ENV_FILE": "/Users/YOU/.config/colab-mcp/secrets.env"
       }
     }
   }
 }
 ```
 
-### Variables de entorno
+Every person who uses it repeats these steps with **their own Google account**: the sign-in token is personal and must not be shared.
 
-| Variable | Por defecto | Uso |
+### Environment variables
+
+| Variable | Default | Purpose |
 |---|---|---|
-| `COLAB_MCP_WORKDIR` | carpeta actual | Única carpeta local a la que el servidor accede |
-| `COLAB_MCP_ENV_FILE` | — | Archivo `NOMBRE=valor` con secretos |
-| `COLAB_MCP_AUTH` | el del CLI | `oauth2` o `adc` (`--auth` del CLI) |
-| `COLAB_MCP_MAX_OUTPUT` | `20000` | Máximo de caracteres devueltos |
-| `COLAB_BIN` | `colab` | Ruta del ejecutable del CLI |
+| `COLAB_MCP_WORKDIR` | current directory | The only local folder the server touches |
+| `COLAB_MCP_ENV_FILE` | — | `NAME=value` file with secrets |
+| `COLAB_MCP_AUTH` | CLI default | `oauth2` or `adc` (the CLI's `--auth`) |
+| `COLAB_MCP_MAX_OUTPUT` | `20000` | Max characters returned per call |
+| `COLAB_MCP_MAX_UPLOAD_MB` | `100` | Per-file/zip upload cap (the CLI sends a file in one request) |
+| `COLAB_MCP_MAX_DOWNLOAD_MB` | `1024` | Cap for unpacked directory downloads |
+| `COLAB_BIN` | `colab` | Path to the CLI executable |
 
-## Primera corrida (laboratorio de modelos)
+## How notebooks work
 
-1. `colab_new` con `gpu="T4"` (solo hace falta GPU para Gemma; los modelos en la nube no la usan).
-2. `colab_upload` del cuaderno exportado a `.py` y de los recibos.
-3. `colab_exec` con `secrets=["OPENROUTER_API_KEY"]`.
-4. `colab_download` de los CSV de resultados y `colab_stop`.
+Notebooks are ordinary `.ipynb` files inside the working directory, edited locally with `nbformat`, so editing needs no runtime. `colab_notebook_run_cell` sends one cell to the runtime through `colab exec`; the kernel keeps its variables between calls, and the cell's output (text, errors, a displayed plot) is written back into the notebook. Cells are addressed by **id** (stable) or index. Plots are saved under `.colab-mcp/images/`.
 
-> El cuaderno del laboratorio lee la clave con `userdata.get` de Colab y, si no está, de la variable de entorno `OPENROUTER_API_KEY`. Con este servidor se usa la variable de entorno. Que `userdata` funcione desde el CLI **no está documentado**.
+`colab_exec` with a `.ipynb` file runs the whole notebook and the CLI saves `<name>_output.ipynb` beside it.
 
-## Pruebas
+## Known unknowns (to confirm against live Colab)
+
+These come from reading the CLI's source and docs, not from running it:
+
+- Kernel variables persisting across `exec` calls (the source reuses the same kernel id, so it should).
+- Cell success/failure detection relies on `get_ipython().run_cell` being available in the Colab kernel.
+- Whether `--output-image` saves every image form (it handles PNG/JPEG display data).
+- The real upload size limit (the CLI sends a file in a single request; the 100 MB cap is a conservative guess).
+- Whether Colab *Secrets* (`userdata`) are readable in the kernel when running through the CLI — undocumented. Use `secrets=[...]` instead.
+- Hosted notebooks in Google Drive (create/delete from Drive) are **not** covered: the CLI has no such command.
+
+## Develop
 
 ```bash
-pip install "mcp<2"
+pip install "mcp<2" nbformat
 python tests/test_server.py
 ```
 
-## Limitaciones conocidas
+The SDK pin `mcp<2` is intentional: 2.x renamed `FastMCP` to `MCPServer`.
 
-- El CLI documenta como predeterminada la autenticación `adc` en su README, pero la versión instalada al momento de escribir esto muestra `oauth2`. Este servidor no fuerza ninguna salvo que definas `COLAB_MCP_AUTH`.
-- La salida de comandos largos (`colab_exec`) llega al terminar, no en vivo.
-- No se ha verificado si el CLI mantiene `Colab Secrets` accesibles en el kernel remoto.
+## License
 
-## Licencia
+Not chosen yet.
 
-Sin definir (decisión del autor).
+---
+
+## Resumen en español
+
+Servidor MCP para que un agente use **Google Colab de punta a punta**: crear y detener runtimes con GPU/TPU, ejecutar código, trabajar en cuadernos celda por celda, lanzar trabajos largos en segundo plano y mover archivos y carpetas hacia y desde la VM. Envuelve el **Colab CLI oficial** de Google.
+
+- **Estado:** probado con un CLI simulado (92 comprobaciones). **Falta validar con Colab real** (ver «Known unknowns»).
+- **Seguridad:** las rutas locales quedan confinadas a `COLAB_MCP_WORKDIR`; las claves viven en un archivo local y nunca se devuelven al modelo; no hay shell; los borrados de cuadernos van a una papelera recuperable.
+- **Instalación:** cada persona repite los pasos de «Install» con su propia cuenta de Google. El token de sesión es personal.
+- **Costo:** lo que ejecutes consume tus unidades de cómputo de Colab. Detén las sesiones que no uses.
