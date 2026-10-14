@@ -197,7 +197,7 @@ See [TERMS.md](TERMS.md): no server and no data collection by the maintainer, wh
 
 ## License
 
-Not chosen yet.
+Apache License 2.0 — see [LICENSE](LICENSE). Copyright 2026 the Colab-MCP contributors (`amgallego8`). The official Colab CLI this project wraps is a separate work, also Apache-2.0, and is not included here.
 
 ---
 

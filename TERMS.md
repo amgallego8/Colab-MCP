@@ -1,5 +1,5 @@
 <!-- Draft written with AI assistance. It describes what the code does today. It is not legal advice:
-     the maintainer should review it (and choose a license) before relying on it. -->
+     the maintainer should review it before relying on it. -->
 
 # Terms of use and privacy
 
@@ -36,7 +36,7 @@ Permanent deletion, sharing, changing permissions, reading other Drive files, an
 
 ## No warranty, limited liability
 
-The software is provided "as is", without warranty of any kind. It has not been validated against live Google services yet (see the README, *Known unknowns*). The maintainer is not liable for lost or deleted notebooks, compute costs, account actions taken by Google, or any other damage arising from its use, to the extent the law allows. The license (not yet chosen) governs the code itself.
+The software is provided "as is", without warranty of any kind. It has not been validated against live Google services yet (see the README, *Known unknowns*). The maintainer is not liable for lost or deleted notebooks, compute costs, account actions taken by Google, or any other damage arising from its use, to the extent the law allows. The code is licensed under the Apache License 2.0 (see `LICENSE`), which also contains its own warranty disclaimer and limitation of liability.
 
 ## Changes and contact
 
