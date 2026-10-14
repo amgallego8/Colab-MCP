@@ -8,3 +8,6 @@ dist/
 .env
 *.env
 secretos*
+
+# Optional OAuth client shipped with the package. Ignored until the maintainer publishes it on purpose (git add -f).
+colab_cli_mcp/shared_client.json
