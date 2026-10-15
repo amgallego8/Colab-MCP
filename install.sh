@@ -51,7 +51,7 @@ fi
 say "5/6  Google Drive (optional)"
 echo "Lets the AI create/open/save Colab notebooks in a Drive folder named Colab-MCP, with one subfolder per project."
 echo "Permission requested: drive.file only - files this tool creates; the rest of your Drive stays invisible to it."
-echo "You choose ONCE whether to use the shared Google client or your own; after that sign-in happens by itself when needed."
+echo "Sign-in uses a Google \"Desktop app\" client of your own (one-time, about 10 minutes; the setup walks you through it). After that a link opens in your browser, you click Allow, and it happens by itself whenever needed."
 DRIVE=0
 if [ -f "$HOME/.config/colab-mcp/drive/token.json" ]; then echo "already signed in to Drive"; DRIVE=1
 elif ask "Set up Drive now?"; then

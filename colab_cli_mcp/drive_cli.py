@@ -41,6 +41,11 @@ Using this tool means accepting TERMS.md (https://github.com/amgallego8/Colab-MC
 and Google's own terms.
 """
 
+NO_SHARED = """This build ships no shared Google client, so you sign in with your own (one-time setup, about 10 minutes;
+you create a free Google Cloud "Desktop app" client and give this tool the JSON you download).
+After that, sign-in is just: a link opens in your browser, you click Allow, done. No code to paste.
+"""
+
 OWN_STEPS = """Create your own client (details: README, "Setup"):
   1. https://console.cloud.google.com -> create a project -> enable "Google Drive API".
   2. Google Auth platform -> Branding (name + support email) -> Audience: External + add yourself
@@ -88,7 +93,11 @@ def choose_client(flags: list[str]):
     if not sys.stdin.isatty():
         print("Not an interactive terminal: pass --own or --shared. Available: " + (", ".join(found) or "none"))
         return None
-    print(MENU.format(shared_note="" if "shared" in found else "\n              (NOT available in this build: the maintainer has not published one yet.)"))
+    if "shared" not in found:
+        # No shared client is shipped: do not offer a choice that cannot work. Go straight to your own client.
+        print(NO_SHARED)
+        return found["own"] if "own" in found else import_own_client()
+    print(MENU.format(shared_note=""))
     while True:
         ans = input("Choose 1 (shared) or 2 (own) [q to quit]: ").strip().lower()
         if ans in {"q", "quit", "exit"}:
