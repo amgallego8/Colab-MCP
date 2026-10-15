@@ -499,9 +499,9 @@ def colab_drive_status(session: str | None = None) -> str:
 
 
 @_tool
-def colab_drive_mount_start(session: str) -> str:
-    """Step 1 of mounting Google Drive on a session: opens Google's approval page in the user's browser (and returns the link). The USER must click Allow; never ask for or handle passwords or codes. WARNING: once mounted, code running on the VM can reach the user's WHOLE Drive; mount only when asked, and stop the session afterwards. Then call colab_drive_mount_finish."""
-    return mount.start(session)
+def colab_drive_mount_start(session: str, show_link: bool = False) -> str:
+    """Step 1 of mounting Google Drive on a session: opens Google's approval page in the user's browser. The link itself is NOT returned (it contains the account e-mail) unless the browser could not be opened or show_link=true. The USER must click Allow; never ask for or handle passwords or codes. WARNING: once mounted, code running on the VM can reach the user's WHOLE Drive; mount only when asked, and stop the session afterwards. Then call colab_drive_mount_finish."""
+    return mount.start(session, show_link=show_link)
 
 
 @_tool

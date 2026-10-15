@@ -8,7 +8,7 @@ It is a thin, safe layer over Google's official **Colab CLI** ([`google-colab-cl
 
 ## Status
 
-- **Tested against a simulated CLI** (118 checks, plus 129 for Drive against a simulated Drive API, 21 for the Drive mount and 17 for local cleanup; `tests/`): a real MCP client talks to the server over stdio and the code that normally runs on the VM is executed for real in a sandbox folder.
+- **Tested against a simulated CLI** (118 checks, plus 129 for Drive against a simulated Drive API, 28 for the Drive mount and 17 for local cleanup; `tests/`): a real MCP client talks to the server over stdio and the code that normally runs on the VM is executed for real in a sandbox folder.
 - **Not yet validated against live Colab.** Sign-in and a first real run are the next step; behaviours the CLI does not document (listed under *Known unknowns*) are flagged below.
 - Linux and macOS only (the Colab CLI does not support Windows).
 
@@ -45,7 +45,7 @@ Google Drive projects and notebooks are a separate, opt-in feature (below). Deli
 
 For big datasets, checkpoints or results that must survive the session, mount Google Drive **on the VM**. This is separate from the optional "Drive notebooks" feature below and uses the Colab CLI's own sign-in.
 
-1. **Mount it from the chat, no terminal.** `colab_drive_mount_start` runs the official `colab drivemount` in a pseudo-terminal (the CLI itself never opens a browser; it only prints a link and waits for Enter), opens Google's approval page in your browser and also returns the link. **You click Allow** (the agent never sees credentials or codes) and tell the agent; `colab_drive_mount_finish` then sends the Enter the CLI was waiting for and `colab_drive_status` confirms. Only `https://*.google.com` links are ever opened, a pending mount is killed after 15 minutes, and there is at most one per session. If you prefer, `colab drivemount -s SESSION` in a terminal still works.
+1. **Mount it from the chat, no terminal.** `colab_drive_mount_start` runs the official `colab drivemount` in a pseudo-terminal (the CLI itself never opens a browser; it only prints a link and waits for Enter), opens Google's approval page in your browser. The link is not repeated in the chat (it contains your account e-mail); it is only returned if the browser could not be opened or with `show_link=true`. **You click Allow** (the agent never sees credentials or codes) and tell the agent; `colab_drive_mount_finish` then sends the Enter the CLI was waiting for and `colab_drive_status` confirms. Only `https://*.google.com` links are ever opened, a pending mount is killed after 15 minutes, and there is at most one per session. If you prefer, `colab drivemount -s SESSION` in a terminal still works.
    **Mounting gives code running on that VM access to your whole Drive** (Colab cannot scope it); only mount when you need it and stop the session afterwards.
 2. The agent calls `colab_drive_project_dir("my-project")`, which creates `/content/drive/MyDrive/Colab-MCP/my-project` and returns the path. Datasets, checkpoints and outputs go there.
 3. Stop the session when done. Files in that Drive folder remain; everything else on the VM is lost.

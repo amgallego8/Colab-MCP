@@ -61,7 +61,8 @@ def main() -> int:
 
     # happy path: URL is opened, nothing mounted until finish, Enter makes it complete
     out = mount.start("ydl")
-    check("start opens the approval page, not the other links the CLI prints", opened == ["https://accounts.google.com/o/oauth2/fake"] and "https://accounts.google.com/o/oauth2/fake" in out, out)
+    check("start opens the approval page, not the other links the CLI prints", opened == ["https://accounts.google.com/o/oauth2/fake"], str(opened))
+    check("start does not repeat the full link in its answer", "o/oauth2/fake" in out and "login_hint" not in out, out)
     check("start does not mount anything by itself", not drive_dir.exists())
     try:
         mount.start("ydl")
@@ -77,6 +78,28 @@ def main() -> int:
         check("finish twice is refused", False)
     except ToolError:
         check("finish twice is refused", True)
+
+    # the link carries the account e-mail: never returned unless needed
+    shutil.rmtree(vm / "content", ignore_errors=True)
+    opened.clear()
+    os.environ["FAKE_DRIVE_URI"] = "https://accounts.google.com/o/oauth2/v2/auth?login_hint=persona%40example.com&state=abc123"
+    out = mount.start("ydl")
+    check("the e-mail and state in the link are not returned", "persona" not in out and "abc123" not in out and "auth?..." in out, out)
+    check("but the browser got the full link", opened == [os.environ["FAKE_DRIVE_URI"]], str(opened))
+    out = mount.finish("ydl")
+    check("finish output hides the link too", "persona" not in out and "abc123" not in out, out)
+    shutil.rmtree(vm / "content", ignore_errors=True)
+    mount.open_browser = lambda url: False
+    out = mount.start("ydl")
+    check("if the browser cannot open, the full link IS returned", "persona%40example.com" in out, out)
+    mount.finish("ydl", cancel=True)
+    mount.open_browser = lambda url: opened.append(url) or True
+    out = mount.start("ydl", show_link=True)
+    check("show_link=true returns the full link", "persona%40example.com" in out, out)
+    mount.finish("ydl", cancel=True)
+    os.environ.pop("FAKE_DRIVE_URI")
+    opened.clear()
+    check("redact hides query and fragment", mount.redact("see https://a.google.com/x?y=1&z=2 and https://b.google.com/p#frag ok") == "see https://a.google.com/x?... and https://b.google.com/p?... ok")
 
     # a link that arrives in pieces is opened whole, never cut
     shutil.rmtree(vm / "content", ignore_errors=True)
