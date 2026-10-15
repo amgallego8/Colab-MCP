@@ -47,6 +47,7 @@ EXPECTED_TOOLS = {
     "colab_notebook_clear_outputs", "colab_notebook_run_cell", "colab_notebook_run_all",
     "colab_notebook_to_script", "colab_notebook_delete", "colab_upload", "colab_download",
     "colab_upload_dir", "colab_download_dir", "colab_ls", "colab_rm", "colab_log",
+    "colab_drive_status", "colab_drive_project_dir",
 }
 
 
@@ -308,6 +309,52 @@ async def main() -> int:
             check("download_dir leaves no temp zip behind", not list((work / ".colab-mcp" / "tmp").glob("*.zip")) and not list((vm / "content" / ".colab_mcp" / "tmp").glob("*.zip")))
             out = await call("colab_download_dir", remote_dir="/content/nope", local_dir="got2")
             check("download_dir of a missing folder errors cleanly", out.startswith("ERROR"), out)
+
+            # ---------------------------------------------------------------- colour codes are stripped
+            out = await call("colab_exec", code="print('\\x1b[0;31mrojo\\x1b[0m y \\x1b[1;32mverde\\x1b[0m')")
+            check("terminal colour codes are removed from results", out.strip() == "rojo y verde" and "\x1b" not in out, repr(out))
+            await call("colab_notebook_create", path="color.ipynb", cells=[{"type": "code", "source": "import sys\nsys.stderr.write('\\x1b[0;31mNameError\\x1b[0m: boom')\nraise SystemExit(0)"}])
+            out = await call("colab_notebook_run_cell", path="color.ipynb", cell="0")
+            check("cell results and stored outputs have no colour codes", "\x1b" not in out and "\x1b" not in (work / "color.ipynb").read_text(), repr(out))
+
+            # ---------------------------------------------------------------- Drive on the VM
+            drive_root = vm / "content" / "drive" / "MyDrive"
+            out = await call("colab_drive_status", session="trainer")
+            check("drive status when not mounted says how to mount it (a human step)", "NOT mounted" in out and "colab drivemount -s trainer" in out and "drivemount" not in " ".join(sum((c["argv"] for c in calls(log)), [])), out)
+            out = await call("colab_drive_project_dir", name="exp1")
+            check("project dir needs Drive mounted", out.startswith("ERROR") and "not mounted" in out, out)
+            drive_root.mkdir(parents=True)
+            (drive_root / "secreto_personal.txt").write_text("no tocar")
+            out = await call("colab_drive_status")
+            check("drive status when mounted reports space and never lists files", '"mounted": true' in out and "secreto_personal" not in out, out)
+            out = await call("colab_drive_project_dir", name="exp1")
+            check("project dir is created inside the reserved folder", out == "/content/drive/MyDrive/Colab-MCP/exp1" and (drive_root / "Colab-MCP" / "exp1").is_dir(), out)
+            for bad in ("../x", "a b", "", "x" * 61, "a/b"):
+                out = await call("colab_drive_project_dir", name=bad)
+                check(f"bad project name refused: {bad!r:.15}", out.startswith("ERROR"), out)
+            (drive_root / "Colab-MCP" / "exp1" / "ck.txt").write_text("ok")
+            for label, tool, kw in (
+                ("rm in Drive root", "colab_rm", dict(path="/content/drive/MyDrive/secreto_personal.txt")),
+                ("rm via ..", "colab_rm", dict(path="/content/drive/MyDrive/Colab-MCP/../secreto_personal.txt")),
+                ("rm via relative drive/", "colab_rm", dict(path="drive/MyDrive/secreto_personal.txt")),
+                ("rm uppercase Drive", "colab_rm", dict(path="/content/DRIVE/MyDrive/secreto_personal.txt")),
+                ("ls Drive root", "colab_ls", dict(path="/content/drive/MyDrive")),
+                ("ls shared drives", "colab_ls", dict(path="/content/drive/Shareddrives")),
+                ("upload into Drive root", "colab_upload", dict(local_path="datos.csv", remote_path="/content/drive/MyDrive/datos.csv")),
+                ("download from Drive root", "colab_download", dict(remote_path="/content/drive/MyDrive/secreto_personal.txt", local_path="robado.txt")),
+                ("download_dir of Drive", "colab_download_dir", dict(remote_dir="/content/drive/MyDrive", local_dir="robado")),
+                ("upload_dir into Drive", "colab_upload_dir", dict(local_dir=".", remote_dir="/content/drive/MyDrive/otra")),
+                ("sibling folder with same prefix", "colab_ls", dict(path="/content/drive/MyDrive/Colab-MCP-otro")),
+            ):
+                out = await call(tool, **kw)
+                check(f"Drive guard: {label} refused", out.startswith("ERROR") and "reserved for this tool" in out, out)
+            check("the personal file was never touched", (drive_root / "secreto_personal.txt").read_text() == "no tocar" and not (work / "robado.txt").exists() and not (work / "robado").exists())
+            out = await call("colab_ls", path="/content/drive/MyDrive/Colab-MCP/exp1")
+            check("ls inside the project folder is allowed", "ck.txt" in out, out)
+            await call("colab_upload", local_path="datos.csv", remote_path="/content/drive/MyDrive/Colab-MCP/exp1/datos.csv")
+            check("upload inside the project folder is allowed", (drive_root / "Colab-MCP" / "exp1" / "datos.csv").is_file())
+            out = await call("colab_rm", path="/content/drive/MyDrive/Colab-MCP/exp1/ck.txt")
+            check("rm inside the project folder is allowed", not (drive_root / "Colab-MCP" / "exp1" / "ck.txt").exists(), out)
 
             # zip-slip: a hostile archive prepared on the "VM" must not escape
             evil = vm / "content" / ".colab_mcp" / "tmp" / "evil.zip"

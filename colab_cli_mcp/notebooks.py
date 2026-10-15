@@ -16,9 +16,8 @@ from pathlib import Path
 import nbformat
 from nbformat.v4 import new_code_cell, new_markdown_cell, new_notebook, new_output
 
-from .core import ToolError, clip, format_result, local_path, run_colab_raw, session_args, workdir
+from .core import ToolError, clip, format_result, local_path, run_colab_raw, session_args, strip_ansi, workdir
 
-ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 SENTINEL = "@@COLAB_MCP_CELL@@"
 CELL_TYPES = {"code", "markdown"}
 TRASH_DIR = ".colab-mcp-trash"
@@ -107,7 +106,7 @@ def _render_cell(i: int, cell, include_outputs: bool) -> str:
     parts = [head + " ---", cell["source"] or "(empty)"]
     if include_outputs and cell["cell_type"] == "code" and cell.get("outputs"):
         parts.append("  >> outputs:")
-        parts += ["  " + ANSI_RE.sub("", _summarize_output(o)).replace("\n", "\n  ") for o in cell["outputs"]]
+        parts += ["  " + strip_ansi(_summarize_output(o)).replace("\n", "\n  ") for o in cell["outputs"]]
     return "\n".join(parts)
 
 

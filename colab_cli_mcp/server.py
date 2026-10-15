@@ -24,16 +24,19 @@ from .core import (
     EVENT_RE,
     JOB_RE,
     PKG_RE,
+    PROJECT_RE,
     TPUS,
     ToolError,
     check_gpu,
     clip,
+    drive_projects_dir,
     format_result,
     guard,
     load_secrets,
     local_path,
     max_upload_bytes,
     run_colab,
+    remote_guard,
     run_colab_raw,
     session_args,
     workdir,
@@ -361,6 +364,7 @@ def colab_upload(local_path: str, remote_path: str, session: str | None = None) 
         raise ToolError(f"Local file not found: {local_path}")
     if local.stat().st_size > max_upload_bytes():
         raise ToolError("File exceeds the upload limit; fetch it from inside the VM instead.")
+    remote_guard(remote_path)
     return run_colab(["upload", *session_args(session), str(local), remote_path], timeout=900)
 
 
@@ -371,6 +375,7 @@ def colab_download(remote_path: str, local_path: str, session: str | None = None
 
     local = _lp(local_path)
     local.parent.mkdir(parents=True, exist_ok=True)
+    remote_guard(remote_path)
     return run_colab(["download", *session_args(session), remote_path, str(local)], timeout=900)
 
 
@@ -378,6 +383,7 @@ def colab_download(remote_path: str, local_path: str, session: str | None = None
 def colab_upload_dir(local_dir: str, remote_dir: str, session: str | None = None) -> str:
     """Upload a whole local folder (inside the working directory) to the VM as one zip, extracted at `remote_dir`. Skips .git, caches, symlinks and likely secret files (.env, *.key, *.pem...)."""
     src = local_path(local_dir)
+    remote_guard(remote_dir)
     if not src.is_dir():
         raise ToolError(f"Not a directory: {local_dir}")
     tmp_dir = workdir() / ".colab-mcp" / "tmp"
@@ -415,6 +421,7 @@ def colab_upload_dir(local_dir: str, remote_dir: str, session: str | None = None
 def colab_download_dir(remote_dir: str, local_dir: str, session: str | None = None) -> str:
     """Download a whole VM folder into `local_dir` (inside the working directory) via one zip. Refuses archives whose paths escape the target or exceed COLAB_MCP_MAX_DOWNLOAD_MB (default 1024)."""
     dest = local_path(local_dir)
+    remote_guard(remote_dir)
     name = uuid.uuid4().hex[:12]
     payload, res = vm.run_snippet(session, vm.ZIP_DIR, {"src": remote_dir, "name": name}, timeout=600)
     info = vm.need(payload, res, "zipping on the VM")
@@ -445,6 +452,7 @@ def colab_download_dir(remote_dir: str, local_dir: str, session: str | None = No
 @_tool
 def colab_ls(path: str = "/content", session: str | None = None) -> str:
     """List files in a VM directory (default /content)."""
+    remote_guard(path)
     return run_colab(["ls", *session_args(session), path], timeout=60)
 
 
@@ -454,7 +462,36 @@ def colab_rm(path: str, session: str | None = None) -> str:
     cleaned = path.strip().rstrip("/")
     if cleaned in {"", ".", "..", "content", "/content", "/"}:
         raise ToolError("Remote path is too broad; name a specific file.")
+    remote_guard(path)
     return run_colab(["rm", *session_args(session), path], timeout=60)
+
+
+@_tool
+def colab_drive_status(session: str | None = None) -> str:
+    """Is Google Drive mounted on this session? Reports yes/no and free space only (never lists your files). Mounting needs YOUR approval in a browser, so it is done by you in a terminal, not by this tool: if it is not mounted the answer says the exact command."""
+    payload, res = vm.run_snippet(session, vm.DRIVE_STATUS, {"projects": drive_projects_dir()}, timeout=60)
+    info = vm.need(payload, res, "checking Drive")
+    if info.get("mounted"):
+        return json.dumps(info, indent=2) + (
+            f"\nFile tools may only use /content/drive/MyDrive/{drive_projects_dir()}/ (use colab_drive_project_dir). "
+            "Note: code you run with colab_exec can reach ALL of your mounted Drive."
+        )
+    name = session or "<session>"
+    return (
+        "Google Drive is NOT mounted on this session.\n"
+        f"To mount it, run in a terminal on your computer:  colab drivemount -s {name}\n"
+        "It opens a Google consent screen and waits for you to press Enter. Mounting gives the code running on this VM "
+        "access to your whole Drive, so only do it when you need the space or persistence, and stop the session afterwards."
+    )
+
+
+@_tool
+def colab_drive_project_dir(name: str, session: str | None = None) -> str:
+    """Create (if missing) and return a project folder on the mounted Drive: /content/drive/MyDrive/<projects folder>/<name>. Use it for big datasets, checkpoints and results that must survive the session. Requires Drive to be mounted (see colab_drive_status)."""
+    if not PROJECT_RE.match(name):
+        raise ToolError("Project name: 1-60 characters, letters, digits, '-' and '_' only.")
+    payload, res = vm.run_snippet(session, vm.DRIVE_PROJECT, {"projects": drive_projects_dir(), "name": name}, timeout=60)
+    return vm.need(payload, res, "creating the project folder")["path"]
 
 
 @_tool

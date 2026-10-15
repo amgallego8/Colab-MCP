@@ -207,3 +207,27 @@ else:
     info["gpu"] = None
 _emit(info)
 '''
+
+
+# --------------------------------------------------------------------------- Google Drive on the VM
+# Mounting is interactive (the user approves in a browser), so it is never done from here.
+
+DRIVE_STATUS = r'''
+import shutil
+my = os.path.join(_p("/content/drive"), "MyDrive")
+out = {"mounted": os.path.isdir(my)}
+if out["mounted"]:
+    du = shutil.disk_usage(my)
+    out["free_gb"], out["total_gb"] = round(du.free / 1e9, 1), round(du.total / 1e9, 1)
+    out["projects_dir_exists"] = os.path.isdir(os.path.join(my, ARGS["projects"]))
+_emit(out)
+'''
+
+DRIVE_PROJECT = r'''
+my = os.path.join(_p("/content/drive"), "MyDrive")
+if not os.path.isdir(my):
+    _emit({"error": "Google Drive is not mounted on this session."})
+else:
+    os.makedirs(os.path.join(my, ARGS["projects"], ARGS["name"]), exist_ok=True)
+    _emit({"path": "/content/drive/MyDrive/%s/%s" % (ARGS["projects"], ARGS["name"])})
+'''
