@@ -100,7 +100,7 @@ uv run colab-cli-mcp-drive login     # asks once how you want to sign in, rememb
 
 `login` shows a menu:
 
-1. **shared** — sign in with your browser, nothing to set up. It uses the OAuth client shipped in `colab_cli_mcp/shared_client.json`; the owner of that Google project (the maintainer) answers to Google for the app. Available only in builds that ship one (this repository does not yet).
+1. **shared** — sign in with your browser, nothing to set up. It uses the OAuth client shipped in `colab_cli_mcp/shared_client.json`; the owner of that Google project (the maintainer) answers to Google for the app. Available only in builds that ship one.
 2. **own** — you create your own Google Cloud project and OAuth client; `login` walks you through it and, when you give it the path of the JSON you downloaded, stores it for you (`0600`). You answer to Google for your project.
 
 The shared client is never used without an explicit choice (a terminal answer or `--shared`). Your choice is remembered in `~/.config/colab-mcp/drive/preference.json`. From then on, when a Drive tool needs access and there is no valid token (first use, or after the 7-day expiry of apps in *Testing* mode), **the server itself opens the browser consent page** and waits for your click; you then repeat the request. Sign-in, the `drive.file` scope, the token file and every guardrail are identical in both cases.
