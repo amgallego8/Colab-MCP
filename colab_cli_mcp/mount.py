@@ -52,6 +52,11 @@ def open_browser(url: str) -> bool:
         return False
 
 
+def redact(text: str) -> str:
+    """Hide the query/fragment of any link: Google puts the user's e-mail (login_hint) and a one-time state in it."""
+    return re.sub(r"(https://[^\s?#]+)[?#]\S*", r"\1?...", text)
+
+
 class Pending:
     """One running `colab drivemount` attached to a pseudo-terminal."""
 
@@ -135,7 +140,7 @@ class Pending:
     def tail(self, n: int = 6) -> str:
         text = strip_ansi(self.output).replace("\r", "")
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        return "\n".join(lines[-n:])
+        return redact("\n".join(lines[-n:]))
 
 
 def _take_controlling_tty():  # runs in the child between fork and exec
@@ -154,7 +159,7 @@ def _session(session: str | None) -> str:
     return session
 
 
-def start(session: str | None) -> str:
+def start(session: str | None, show_link: bool = False) -> str:
     name = _session(session)
     with _LOCK:
         old = _PENDING.get(name)
@@ -186,10 +191,21 @@ def start(session: str | None) -> str:
         _PENDING.pop(name, None)
         raise ToolError("The approval link was not an https page on google.com, so it was not opened. Nothing was mounted.")
     opened = open_browser(pending.url)
+    if opened and not show_link:
+        # The full link carries the user's e-mail and a one-time state: keep it out of the conversation.
+        shown = (
+            "Opened the Google approval page in the browser (the link is not repeated here because it contains "
+            f"the account e-mail). If no window appears, call colab_drive_mount_finish with cancel=true and then colab_drive_mount_start again with show_link=true.\n"
+            f"Page: {redact(pending.url)}"
+        )
+    else:
+        shown = (
+            ("Opened the Google approval page in the browser." if opened else "Could not open a browser from here.")
+            + f" If no window appears, ask the user to open this link:\n{pending.url}"
+        )
     return (
-        ("Opened the Google approval page in the browser." if opened else "Could not open a browser from here.")
-        + f"\nIf nothing appears, open this link yourself:\n{pending.url}\n"
-        "The user must click Allow. This gives code running on the VM access to the WHOLE Drive "
+        shown
+        + "\nThe user must click Allow. This gives code running on the VM access to the WHOLE Drive "
         "(stop the session when done). When the user says it is done, call colab_drive_mount_finish."
     )
 
