@@ -47,7 +47,7 @@ EXPECTED_TOOLS = {
     "colab_notebook_clear_outputs", "colab_notebook_run_cell", "colab_notebook_run_all",
     "colab_notebook_to_script", "colab_notebook_delete", "colab_upload", "colab_download",
     "colab_upload_dir", "colab_download_dir", "colab_ls", "colab_rm", "colab_log",
-    "colab_drive_status", "colab_drive_project_dir", "colab_local_footprint", "colab_local_cleanup",
+    "colab_drive_status", "colab_drive_mount_start", "colab_drive_mount_finish", "colab_drive_project_dir", "colab_local_footprint", "colab_local_cleanup",
 }
 
 
@@ -320,7 +320,7 @@ async def main() -> int:
             # ---------------------------------------------------------------- Drive on the VM
             drive_root = vm / "content" / "drive" / "MyDrive"
             out = await call("colab_drive_status", session="trainer")
-            check("drive status when not mounted says how to mount it (a human step)", "NOT mounted" in out and "colab drivemount -s trainer" in out and "drivemount" not in " ".join(sum((c["argv"] for c in calls(log)), [])), out)
+            check("drive status when not mounted points to the in-chat mount tools", "NOT mounted" in out and "colab_drive_mount_start" in out and "drivemount" not in " ".join(sum((c["argv"] for c in calls(log)), [])), out)
             out = await call("colab_drive_project_dir", name="exp1")
             check("project dir needs Drive mounted", out.startswith("ERROR") and "not mounted" in out, out)
             drive_root.mkdir(parents=True)

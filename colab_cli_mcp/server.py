@@ -3,8 +3,9 @@
 Runs on the user's machine and talks MCP over stdio. See README.md for setup and
 the security model (confined local paths, secrets that never reach the model).
 
-Not exposed on purpose: sign-in, `colab auth`, `colab drivemount`, `repl`, `console`,
-`ssh`, `edit` — they are interactive and cannot work through a tool call.
+Not exposed on purpose: sign-in, `colab auth`, `repl`, `console`, `ssh`, `edit` — they are
+interactive and cannot work through a tool call. (`colab drivemount` is wrapped by
+colab_drive_mount_start / colab_drive_mount_finish, which run it in a pseudo-terminal.)
 """
 
 import json
@@ -19,6 +20,7 @@ from mcp.server.fastmcp import FastMCP
 
 from . import drive
 from . import footprint
+from . import mount
 from . import notebooks as nb
 from . import vm
 from .core import (
@@ -479,7 +481,7 @@ def colab_rm(path: str, session: str | None = None) -> str:
 
 @_tool
 def colab_drive_status(session: str | None = None) -> str:
-    """Is Google Drive mounted on this session? Reports yes/no and free space only (never lists your files). Mounting needs YOUR approval in a browser, so it is done by you in a terminal, not by this tool: if it is not mounted the answer says the exact command."""
+    """Is Google Drive mounted on this session? Reports yes/no and free space only (never lists your files). If it is not mounted, use colab_drive_mount_start (the user approves in the browser)."""
     payload, res = vm.run_snippet(session, vm.DRIVE_STATUS, {"projects": drive_projects_dir()}, timeout=60)
     info = vm.need(payload, res, "checking Drive")
     if info.get("mounted"):
@@ -490,10 +492,22 @@ def colab_drive_status(session: str | None = None) -> str:
     name = session or "<session>"
     return (
         "Google Drive is NOT mounted on this session.\n"
-        f"To mount it, run in a terminal on your computer:  colab drivemount -s {name}\n"
-        "It opens a Google consent screen and waits for you to press Enter. Mounting gives the code running on this VM "
-        "access to your whole Drive, so only do it when you need the space or persistence, and stop the session afterwards."
+        f"Call colab_drive_mount_start(session='{name}'): it opens Google's approval page in the browser; the user clicks Allow, "
+        "then call colab_drive_mount_finish. Mounting gives the code running on this VM access to the user's whole Drive, "
+        "so only do it when the space or persistence is needed, and stop the session afterwards."
     )
+
+
+@_tool
+def colab_drive_mount_start(session: str) -> str:
+    """Step 1 of mounting Google Drive on a session: opens Google's approval page in the user's browser (and returns the link). The USER must click Allow; never ask for or handle passwords or codes. WARNING: once mounted, code running on the VM can reach the user's WHOLE Drive; mount only when asked, and stop the session afterwards. Then call colab_drive_mount_finish."""
+    return mount.start(session)
+
+
+@_tool
+def colab_drive_mount_finish(session: str, cancel: bool = False) -> str:
+    """Step 2 of mounting Google Drive: call it AFTER the user says they clicked Allow. Completes the mount; then verify with colab_drive_status. cancel=true abandons a pending mount."""
+    return mount.finish(session, cancel=cancel)
 
 
 @_tool
