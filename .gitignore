@@ -11,3 +11,19 @@ secretos*
 
 # Optional OAuth client shipped with the package. Ignored until the maintainer publishes it on purpose (git add -f).
 colab_cli_mcp/shared_client.json
+
+# Never commit credentials, tokens or local state (they live in ~/.config/colab-mcp, not here)
+token.json
+client_secret*.json
+credentials*.json
+audit.log
+preference.json
+*.pem
+*.key
+*.p12
+.colab-mcp/
+.colab-mcp-trash/
+.DS_Store
+.idea/
+.vscode/
+.claude/
