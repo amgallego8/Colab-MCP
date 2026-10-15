@@ -47,7 +47,7 @@ EXPECTED_TOOLS = {
     "colab_notebook_clear_outputs", "colab_notebook_run_cell", "colab_notebook_run_all",
     "colab_notebook_to_script", "colab_notebook_delete", "colab_upload", "colab_download",
     "colab_upload_dir", "colab_download_dir", "colab_ls", "colab_rm", "colab_log",
-    "colab_drive_status", "colab_drive_project_dir",
+    "colab_drive_status", "colab_drive_project_dir", "colab_local_footprint", "colab_local_cleanup",
 }
 
 

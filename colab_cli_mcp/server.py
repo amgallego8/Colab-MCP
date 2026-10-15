@@ -18,6 +18,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from . import drive
+from . import footprint
 from . import notebooks as nb
 from . import vm
 from .core import (
@@ -374,6 +375,7 @@ def colab_download(remote_path: str, local_path: str, session: str | None = None
     from .core import local_path as _lp
 
     local = _lp(local_path)
+    footprint.check_space(0, "a download")
     local.parent.mkdir(parents=True, exist_ok=True)
     remote_guard(remote_path)
     return run_colab(["download", *session_args(session), remote_path, str(local)], timeout=900)
@@ -403,6 +405,8 @@ def colab_upload_dir(local_dir: str, remote_dir: str, session: str | None = None
                     z.write(full, full.relative_to(src))
                     count += 1
                     total += full.stat().st_size
+                    if zpath.stat().st_size > max_upload_bytes():
+                        raise ToolError("The zipped folder exceeds the upload limit; upload less or fetch data inside the VM.")
         if zpath.stat().st_size > max_upload_bytes():
             raise ToolError("The zipped folder exceeds the upload limit; upload less or fetch data inside the VM.")
         remote_zip = f"/content/.colab_mcp/tmp/{name}.zip"
@@ -422,9 +426,16 @@ def colab_download_dir(remote_dir: str, local_dir: str, session: str | None = No
     """Download a whole VM folder into `local_dir` (inside the working directory) via one zip. Refuses archives whose paths escape the target or exceed COLAB_MCP_MAX_DOWNLOAD_MB (default 1024)."""
     dest = local_path(local_dir)
     remote_guard(remote_dir)
+    footprint.check_space(0, "a download")
     name = uuid.uuid4().hex[:12]
     payload, res = vm.run_snippet(session, vm.ZIP_DIR, {"src": remote_dir, "name": name}, timeout=600)
     info = vm.need(payload, res, "zipping on the VM")
+    try:
+        # the zip and its extracted contents coexist briefly: check both before downloading anything
+        footprint.check_space(int(info.get("zip_bytes", 0)) + int(info.get("bytes", 0)), "this download")
+    except ToolError:
+        vm.run_snippet(session, vm.REMOVE_FILE, {"path": info["zip"]}, timeout=60)
+        raise
     tmp_dir = workdir() / ".colab-mcp" / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     zpath = tmp_dir / f"{name}.zip"
@@ -507,6 +518,18 @@ def colab_log(session: str | None = None, lines: int = 50, event_type: str | Non
     return run_colab(args, timeout=60)
 
 
+@_tool
+def colab_local_footprint() -> str:
+    """Show how much this tool keeps on your computer (temp files, plots, local trash), free disk and the working-directory budget. Read-only."""
+    return footprint.report()
+
+
+@_tool
+def colab_local_cleanup() -> str:
+    """Delete everything this tool keeps only temporarily on your computer: transfer zips, saved plots and old local trash. Never touches your notebooks, data or anything outside those folders."""
+    return footprint.describe(footprint.sweep(everything=True))
+
+
 # =========================================================================== Google Drive (opt-in)
 # Registered only when COLAB_MCP_DRIVE=1. These three tools are the whole Drive surface: create a
 # notebook, list the ones this server created, move one to the Drive trash. See drive.py.
@@ -536,6 +559,7 @@ if drive.enabled():
 
 
 def main() -> None:
+    footprint.sweep_quietly()
     mcp.run()
 
 
