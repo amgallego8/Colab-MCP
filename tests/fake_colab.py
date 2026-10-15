@@ -159,6 +159,21 @@ elif cmd == "ls":
 elif cmd == "rm":
     os.remove(vm_path(positional()[0]))
     print("[colab] Deleted")
+elif cmd == "drivemount":
+    name = opt("-s", "default")
+    print(f"[colab] Mounting Google Drive to '/content/drive' on {name}...", flush=True)
+    mode = os.environ.get("FAKE_DRIVE_MODE", "consent")
+    if mode == "consent":
+        print(f"\n[colab] REQUIRED: Google Drive Authorization needed.\nPlease visit:\n\n{os.environ.get('FAKE_DRIVE_URI', 'https://accounts.google.com/o/oauth2/fake')}\n", flush=True)
+        sys.stdout.write("Press Enter after you have granted access... ")
+        sys.stdout.flush()
+        with open("/dev/tty") as tty:
+            tty.readline()
+    elif mode == "fail":
+        print("[colab] boom", flush=True)
+        sys.exit(1)
+    os.makedirs(os.path.join(VM, "content/drive/MyDrive"), exist_ok=True)
+    print("[colab] Credentials propagated. Resuming mount...", flush=True)
 elif cmd == "log":
     n = int(opt("--lines", "5"))
     print("\n".join(f"evento {i}" for i in range(n)))

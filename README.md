@@ -8,11 +8,11 @@ It is a thin, safe layer over Google's official **Colab CLI** ([`google-colab-cl
 
 ## Status
 
-- **Tested against a simulated CLI** (118 checks, plus 129 for Drive against a simulated Drive API and 17 for local cleanup; `tests/`): a real MCP client talks to the server over stdio and the code that normally runs on the VM is executed for real in a sandbox folder.
+- **Tested against a simulated CLI** (118 checks, plus 129 for Drive against a simulated Drive API, 20 for the Drive mount and 17 for local cleanup; `tests/`): a real MCP client talks to the server over stdio and the code that normally runs on the VM is executed for real in a sandbox folder.
 - **Not yet validated against live Colab.** Sign-in and a first real run are the next step; behaviours the CLI does not document (listed under *Known unknowns*) are flagged below.
 - Linux and macOS only (the Colab CLI does not support Windows).
 
-## Tools (40 + 8 optional Drive tools)
+## Tools (42 + 8 optional Drive tools)
 
 | Area | Tools |
 |---|---|
@@ -21,7 +21,7 @@ It is a thin, safe layer over Google's official **Colab CLI** ([`google-colab-cl
 | **Notebooks** (local `.ipynb`) | `colab_notebook_create`, `_list`, `_read`, `_add_cell`, `_edit_cell`, `_delete_cell`, `_move_cell`, `_clear_outputs`, `_run_cell`, `_run_all`, `_to_script`, `_delete` |
 | **Long jobs** | `colab_job_start`, `_status`, `_logs`, `_cancel`, `_list` |
 | **Files** | `colab_upload`, `colab_download`, `colab_upload_dir`, `colab_download_dir`, `colab_ls`, `colab_rm`, `colab_log` |
-| **Drive on the VM** | `colab_drive_status`, `colab_drive_project_dir` (see *Big projects and Drive*) |
+| **Drive on the VM** | `colab_drive_status`, `colab_drive_mount_start`, `colab_drive_mount_finish`, `colab_drive_project_dir` (see *Big projects and Drive*) |
 | **Local footprint** | `colab_local_footprint`, `colab_local_cleanup` (see *Where things live*) |
 
 Typical flows:
@@ -29,7 +29,7 @@ Typical flows:
 - **Interactive:** `colab_ensure_session(gpu="T4")` → `colab_notebook_create` → add cells → `colab_notebook_run_cell` one by one (variables persist) → read outputs → `colab_stop`.
 - **Batch:** `colab_upload_dir` → `colab_job_start("python -u train.py")` → poll `colab_job_logs` → `colab_download_dir` → `colab_stop`.
 
-Google Drive projects and notebooks are a separate, opt-in feature (below). Deliberately **not** included anywhere: sign-in through a tool, `colab auth`, `colab drivemount`, `repl`, `console`, `ssh`, `edit`. They are interactive and cannot work through a tool call.
+Google Drive projects and notebooks are a separate, opt-in feature (below). Deliberately **not** included anywhere: sign-in through a tool, `colab auth`, `repl`, `console`, `ssh`, `edit`. They are interactive and cannot work through a tool call.
 
 ## Security model
 
@@ -45,7 +45,8 @@ Google Drive projects and notebooks are a separate, opt-in feature (below). Deli
 
 For big datasets, checkpoints or results that must survive the session, mount Google Drive **on the VM**. This is separate from the optional "Drive notebooks" feature below and uses the Colab CLI's own sign-in.
 
-1. **You mount it, in a terminal** (it needs your approval in a browser, so the agent cannot do it): `colab drivemount -s SESSION`. `colab_drive_status` tells the agent whether it is mounted and, if not, shows you that exact command.
+1. **Mount it from the chat, no terminal.** `colab_drive_mount_start` runs the official `colab drivemount` in a pseudo-terminal (the CLI itself never opens a browser; it only prints a link and waits for Enter), opens Google's approval page in your browser and also returns the link. **You click Allow** (the agent never sees credentials or codes) and tell the agent; `colab_drive_mount_finish` then sends the Enter the CLI was waiting for and `colab_drive_status` confirms. Only `https://*.google.com` links are ever opened, a pending mount is killed after 15 minutes, and there is at most one per session. If you prefer, `colab drivemount -s SESSION` in a terminal still works.
+   **Mounting gives code running on that VM access to your whole Drive** (Colab cannot scope it); only mount when you need it and stop the session afterwards.
 2. The agent calls `colab_drive_project_dir("my-project")`, which creates `/content/drive/MyDrive/Colab-MCP/my-project` and returns the path. Datasets, checkpoints and outputs go there.
 3. Stop the session when done. Files in that Drive folder remain; everything else on the VM is lost.
 
@@ -236,6 +237,7 @@ pip install "mcp<2" nbformat google-auth google-auth-oauthlib requests
 python tests/test_server.py   # the Colab tools, with a simulated CLI
 python tests/test_drive.py    # the Drive tools, with a simulated Drive API
 python tests/test_footprint.py # local cleanup and disk guards
+python tests/test_mount.py     # Drive mount from the chat, with a simulated CLI
 ```
 
 The SDK pin `mcp<2` is intentional: 2.x renamed `FastMCP` to `MCPServer`.
