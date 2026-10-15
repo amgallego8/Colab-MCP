@@ -99,10 +99,9 @@ uv sync
 uv run colab-cli-mcp-drive login     # asks once how you want to sign in, remembers it, signs you in
 ```
 
-`login` shows a menu:
+`login` walks you through creating **your own** Google Cloud "Desktop app" client (about 10 minutes, once, free; steps below). When you give it the path of the JSON you downloaded it stores it for you (`0600`). You answer to Google for your project. After that, signing in is just: a link opens in your browser, you click Allow, done. There is no code to paste.
 
-1. **shared** — sign in with your browser, nothing to set up. It uses the OAuth client shipped in `colab_cli_mcp/shared_client.json`; the owner of that Google project (the maintainer) answers to Google for the app. Available only in builds that ship one.
-2. **own** — you create your own Google Cloud project and OAuth client; `login` walks you through it and, when you give it the path of the JSON you downloaded, stores it for you (`0600`). You answer to Google for your project.
+**No shared one-click client is shipped yet.** If this repository reaches **1,000 stars**, the maintainer intends to publish one (a ready-made client so that signing in needs no Google Cloud setup at all). That is a plan, not a promise. The code for it already exists: if a build ships `colab_cli_mcp/shared_client.json`, `login` offers a menu with *shared* and *own*.
 
 The shared client is never used without an explicit choice (a terminal answer or `--shared`). Your choice is remembered in `~/.config/colab-mcp/drive/preference.json`. From then on, when a Drive tool needs access and there is no valid token (first use, or after the 7-day expiry of apps in *Testing* mode), **the server itself opens the browser consent page** and waits for your click; you then repeat the request. Sign-in, the `drive.file` scope, the token file and every guardrail are identical in both cases.
 
@@ -110,7 +109,7 @@ Then leave **per-call approval on** for `drive_notebook_delete` in your MCP clie
 
 To leave: `colab-cli-mcp-drive logout` (deletes the token and revokes it at Google), and remove the app at <https://myaccount.google.com/permissions> if revocation could not be confirmed.
 
-### Creating your own client by hand (option 2 in detail)
+### Creating your own client (what `login` asks you to do)
 
 1. In the [Google Cloud console](https://console.cloud.google.com/) create a project and enable the **Google Drive API** ([guide](https://developers.google.com/workspace/guides/enable-apis)).
 2. Configure the consent screen / Google Auth Platform ([guide](https://developers.google.com/workspace/guides/configure-oauth-consent)): under **Audience** pick *External* and add yourself under *Test users*; under **Data Access → Add or Remove Scopes** add only `.../auth/drive.file`.

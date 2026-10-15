@@ -550,16 +550,16 @@ def main():
     shipped_existed = shipped.exists()
     if shipped_existed:
         shipped.unlink()
-    check("menu: choosing shared when none is shipped is refused, then quit", ask(["1", "q"]) is None)
+    check("no shared client shipped: no menu, it asks straight for your own client JSON (Enter cancels)", ask([""]) is None)
     dl = tmp / "descargado.json"
     dl.write_text(json.dumps({"installed": {"client_id": "x", "client_secret": "y"}}))
-    got = ask(["2", str(dl)])
+    got = ask([str(dl)])
     check("menu: own -> imports the downloaded JSON with 0600", got == tmp / "cfg2" / "client_secret.json" and stat.S_IMODE(got.stat().st_mode) == 0o600, str(got))
     web = tmp / "web.json"
     web.write_text(json.dumps({"web": {}}))
     os.environ["COLAB_MCP_DRIVE_CLIENT"] = str(tmp / "cfg3" / "client_secret.json")
-    check("menu: a non-Desktop client JSON is rejected", ask(["2", str(web)]) is None and not (tmp / "cfg3" / "client_secret.json").exists())
-    check("menu: Enter cancels the own import", ask(["2", ""]) is None)
+    check("menu: a non-Desktop client JSON is rejected", ask([str(web)]) is None and not (tmp / "cfg3" / "client_secret.json").exists())
+    check("no shared client: a wrong path is refused", ask([str(tmp / "no-existe.json")]) is None)
     shipped.write_text("{}")
     check("menu: shared works when shipped", ask(["1"]) == shipped)
     shipped.unlink()
