@@ -170,7 +170,7 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
             if os.path.islink(full):
                 continue
             z.write(full, os.path.relpath(full, src)); n += 1; total += os.path.getsize(full)
-_emit({"zip": "/content/.colab_mcp/tmp/" + ARGS["name"] + ".zip", "files": n, "bytes": total})
+_emit({"zip": "/content/.colab_mcp/tmp/" + ARGS["name"] + ".zip", "files": n, "bytes": total, "zip_bytes": os.path.getsize(out)})
 '''
 
 REMOVE_FILE = r'''
