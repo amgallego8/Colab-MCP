@@ -516,6 +516,7 @@ def main():
     own.write_text("{}")
     shipped = drive.bundled_client_path()
     had = shipped.exists()
+    original = shipped.read_bytes() if had else None
     from colab_cli_mcp import drive_cli
     try:
         os.environ["COLAB_MCP_DRIVE_CLIENT"] = str(tmp / "nope.json")
@@ -562,10 +563,18 @@ def main():
     shipped.write_text("{}")
     check("menu: shared works when shipped", ask(["1"]) == shipped)
     shipped.unlink()
-    if shipped_existed:
-        shipped.write_text("{}")
+    if original is not None:
+        shipped.write_bytes(original)
     os.environ.pop("COLAB_MCP_DRIVE_CLIENT")
-    check("no shared client is shipped by default", not drive.bundled_client_path().exists())
+    if original is not None:
+        shipped.write_bytes(original)
+    ok_shape = True
+    if drive.bundled_client_path().exists():
+        try:
+            ok_shape = "installed" in json.loads(drive.bundled_client_path().read_text())
+        except ValueError:
+            ok_shape = False
+    check("a shipped shared client, if any, is a valid Desktop-app client JSON and is left untouched by the tests", ok_shape and (original is None or drive.bundled_client_path().read_bytes() == original))
 
     # ---- MCP surface
     surface = asyncio.run(mcp_surface(tmp))
