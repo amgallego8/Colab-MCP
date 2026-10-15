@@ -12,7 +12,7 @@ It is a thin, safe layer over Google's official **Colab CLI** ([`google-colab-cl
 - **Not yet validated against live Colab.** Sign-in and a first real run are the next step; behaviours the CLI does not document (listed under *Known unknowns*) are flagged below.
 - Linux and macOS only (the Colab CLI does not support Windows).
 
-## Tools (36)
+## Tools (38 + 3 optional Drive-notebook tools)
 
 | Area | Tools |
 |---|---|
@@ -21,6 +21,7 @@ It is a thin, safe layer over Google's official **Colab CLI** ([`google-colab-cl
 | **Notebooks** (local `.ipynb`) | `colab_notebook_create`, `_list`, `_read`, `_add_cell`, `_edit_cell`, `_delete_cell`, `_move_cell`, `_clear_outputs`, `_run_cell`, `_run_all`, `_to_script`, `_delete` |
 | **Long jobs** | `colab_job_start`, `_status`, `_logs`, `_cancel`, `_list` |
 | **Files** | `colab_upload`, `colab_download`, `colab_upload_dir`, `colab_download_dir`, `colab_ls`, `colab_rm`, `colab_log` |
+| **Drive on the VM** | `colab_drive_status`, `colab_drive_project_dir` (see *Big projects and Drive*) |
 
 Typical flows:
 
@@ -36,8 +37,20 @@ Google Drive create/delete is a separate, opt-in feature (next section). Deliber
 - **No shell.** The CLI is run with an argument list. Session names, GPU types, package specifiers and job ids are validated. Everything user-controlled that is embedded in code for the VM goes through `repr()`.
 - **Folder transfers are guarded.** Uploads skip `.git`, caches, symlinks and likely secrets (`.env`, `*.pem`, `*.key`…); downloads reject archives with paths that escape the target (zip-slip) or exceed a size limit.
 - **No hard deletes on your computer.** `colab_notebook_delete` moves the file to `.colab-mcp-trash/`. `colab_rm` only touches the VM and refuses root-like paths.
-- Output is clipped to `COLAB_MCP_MAX_OUTPUT` characters.
+- Output is clipped to `COLAB_MCP_MAX_OUTPUT` characters, and terminal colour codes (tracebacks) are stripped.
 - Code you run executes on Google's machines **under your account and spends your compute units**. Stop sessions you no longer need.
+
+## Big projects and Drive on the VM
+
+For big datasets, checkpoints or results that must survive the session, mount Google Drive **on the VM**. This is separate from the optional "Drive notebooks" feature below and uses the Colab CLI's own sign-in.
+
+1. **You mount it, in a terminal** (it needs your approval in a browser, so the agent cannot do it): `colab drivemount -s SESSION`. `colab_drive_status` tells the agent whether it is mounted and, if not, shows you that exact command.
+2. The agent calls `colab_drive_project_dir("my-project")`, which creates `/content/drive/MyDrive/Colab-MCP/my-project` and returns the path. Datasets, checkpoints and outputs go there.
+3. Stop the session when done. Files in that Drive folder remain; everything else on the VM is lost.
+
+Guardrail: the file tools (`colab_upload*`, `colab_download*`, `colab_ls`, `colab_rm`) **refuse any Drive path outside `/content/drive/MyDrive/Colab-MCP/`** (folder name configurable with `COLAB_MCP_DRIVE_PROJECTS`), including `..`, relative and case tricks. `colab_drive_status` never lists your files.
+
+**Residual risk, stated plainly:** once Drive is mounted, *any code that runs on the VM* (`colab_exec`, `colab_run`, jobs, notebook cells) can read and change **all** of your Drive; the path guard only covers this server's file tools, and it cannot see symlinks created on the VM. Mount only when you need it, review the code you run, and stop the session afterwards.
 
 ## Google Drive: create and delete Colab notebooks (opt-in)
 
@@ -170,6 +183,7 @@ Every person who uses it repeats these steps with **their own Google account**: 
 | `COLAB_MCP_MAX_UPLOAD_MB` | `100` | Per-file/zip upload cap (the CLI sends a file in one request) |
 | `COLAB_MCP_MAX_DOWNLOAD_MB` | `1024` | Cap for unpacked directory downloads |
 | `COLAB_BIN` | `colab` | Path to the CLI executable |
+| `COLAB_MCP_DRIVE_PROJECTS` | `Colab-MCP` | The only Drive folder (under MyDrive) the file tools may use when Drive is mounted on the VM |
 
 ## How notebooks work
 

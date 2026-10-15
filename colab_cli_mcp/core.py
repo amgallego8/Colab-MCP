@@ -11,6 +11,7 @@ Safety properties enforced here:
 
 import functools
 import os
+import posixpath
 import re
 import subprocess
 from dataclasses import dataclass
@@ -21,12 +22,45 @@ KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 PKG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-\[\],<>=!~+]*$")
 JOB_RE = re.compile(r"^[0-9]{6,12}-[0-9a-f]{6}$")
 EVENT_RE = re.compile(r"^[a-z_]{1,40}$")
+PROJECT_RE = re.compile(r"^[A-Za-z0-9_-]{1,60}$")
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+DRIVE_PATH_RE = re.compile(r"^/(content/)?drive(/|$)", re.IGNORECASE)
 GPUS = {"T4", "L4", "G4", "H100", "A100"}
 TPUS = {"v5e1", "v6e1"}
 
 
 def colab_bin() -> str:
     return os.environ.get("COLAB_BIN", "colab")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove terminal colour/cursor codes (tracebacks from the kernel are full of them)."""
+    return ANSI_RE.sub("", text)
+
+
+def drive_projects_dir() -> str:
+    """Name of the only Drive folder (under MyDrive) that file tools may touch on the VM."""
+    name = os.environ.get("COLAB_MCP_DRIVE_PROJECTS", "Colab-MCP").strip()
+    if not PROJECT_RE.match(name):
+        raise ToolError("COLAB_MCP_DRIVE_PROJECTS must be a simple folder name (letters, digits, '-' and '_').")
+    return name
+
+
+def remote_guard(path: str) -> str:
+    """Refuse VM paths that point into a mounted Google Drive, except inside the projects folder."""
+    raw = str(path).strip()
+    if "\x00" in raw:
+        raise ToolError("Invalid remote path.")
+    norm = posixpath.normpath("/" + raw.lstrip("/"))
+    if DRIVE_PATH_RE.match(norm):
+        base = drive_projects_dir()
+        allowed = (f"/content/drive/MyDrive/{base}", f"/drive/MyDrive/{base}")
+        if not any(norm == a or norm.startswith(a + "/") for a in allowed):
+            raise ToolError(
+                f"Refusing to touch Google Drive outside /content/drive/MyDrive/{base}/ (the folder reserved for this tool). "
+                "Use colab_drive_project_dir to get a folder inside it."
+            )
+    return raw
 
 
 def max_output() -> int:
@@ -175,8 +209,12 @@ def run_colab_raw(args: list[str], *, stdin: str | None = None, timeout: float =
         partial = exc.stdout or ""
         if isinstance(partial, bytes):
             partial = partial.decode("utf-8", "replace")
-        return Result(-1, scrub(partial, secrets), "", f"Timed out after {timeout:.0f} s.")
-    return Result(proc.returncode, scrub(proc.stdout or "", secrets), scrub(proc.stderr or "", secrets))
+        return Result(-1, strip_ansi(scrub(partial, secrets)), "", f"Timed out after {timeout:.0f} s.")
+    return Result(
+        proc.returncode,
+        strip_ansi(scrub(proc.stdout or "", secrets)),
+        strip_ansi(scrub(proc.stderr or "", secrets)),
+    )
 
 
 LOGIN_HINT = (
