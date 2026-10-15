@@ -1,6 +1,7 @@
 """Tests for mounting Drive from the chat (mount.py), with a simulated CLI that really waits on /dev/tty.
 Run: python tests/test_mount.py"""
 import os
+import shutil
 import stat
 import sys
 import tempfile
@@ -60,7 +61,7 @@ def main() -> int:
 
     # happy path: URL is opened, nothing mounted until finish, Enter makes it complete
     out = mount.start("ydl")
-    check("start opens the consent page and returns the link", opened == ["https://accounts.google.com/o/oauth2/fake"] and "https://accounts.google.com/o/oauth2/fake" in out, out)
+    check("start opens the approval page, not the other links the CLI prints", opened == ["https://accounts.google.com/o/oauth2/fake"] and "https://accounts.google.com/o/oauth2/fake" in out, out)
     check("start does not mount anything by itself", not drive_dir.exists())
     try:
         mount.start("ydl")
@@ -77,9 +78,19 @@ def main() -> int:
     except ToolError:
         check("finish twice is refused", True)
 
+    # a link that arrives in pieces is opened whole, never cut
+    shutil.rmtree(vm / "content", ignore_errors=True)
+    opened.clear()
+    os.environ["FAKE_DRIVE_URI"] = "https://accounts.google.com/o/oauth2/v2/auth?client_id=abc&scope=drive&state=xyz"
+    os.environ["FAKE_DRIVE_SLOW"] = "1"
+    mount.start("ydl")
+    check("a link delivered in two pieces is opened complete", opened == [os.environ["FAKE_DRIVE_URI"]], str(opened))
+    mount.finish("ydl", cancel=True)
+    os.environ.pop("FAKE_DRIVE_SLOW")
+    os.environ.pop("FAKE_DRIVE_URI")
+
     # cancel
-    import shutil
-    shutil.rmtree(vm / "content")
+    shutil.rmtree(vm / "content", ignore_errors=True)
     opened.clear()
     mount.start("ydl")
     out = mount.finish("ydl", cancel=True)
@@ -90,7 +101,7 @@ def main() -> int:
     opened.clear()
     out = mount.start("ydl")
     check("no approval needed: reports it and mounted", "No approval was needed" in out and drive_dir.is_dir() and not opened, out)
-    shutil.rmtree(vm / "content")
+    shutil.rmtree(vm / "content", ignore_errors=True)
 
     # failures
     os.environ["FAKE_DRIVE_MODE"] = "fail"

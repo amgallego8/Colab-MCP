@@ -163,8 +163,18 @@ elif cmd == "drivemount":
     name = opt("-s", "default")
     print(f"[colab] Mounting Google Drive to '/content/drive' on {name}...", flush=True)
     mode = os.environ.get("FAKE_DRIVE_MODE", "consent")
+    print("\n[colab] Intercepted Drive Auth Request. Connecting to https://colab.research.google.com...", flush=True)
     if mode == "consent":
-        print(f"\n[colab] REQUIRED: Google Drive Authorization needed.\nPlease visit:\n\n{os.environ.get('FAKE_DRIVE_URI', 'https://accounts.google.com/o/oauth2/fake')}\n", flush=True)
+        uri = os.environ.get("FAKE_DRIVE_URI", "https://accounts.google.com/o/oauth2/fake")
+        print("\n[colab] REQUIRED: Google Drive Authorization needed.\nPlease visit:\n", flush=True)
+        if os.environ.get("FAKE_DRIVE_SLOW"):  # the link arrives in two pieces
+            sys.stdout.write(uri[:30])
+            sys.stdout.flush()
+            time.sleep(1.5)
+            sys.stdout.write(uri[30:] + "\n\n")
+            sys.stdout.flush()
+        else:
+            print(uri + "\n", flush=True)
         sys.stdout.write("Press Enter after you have granted access... ")
         sys.stdout.flush()
         with open("/dev/tty") as tty:

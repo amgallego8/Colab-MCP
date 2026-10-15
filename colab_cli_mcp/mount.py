@@ -24,7 +24,9 @@ from urllib.parse import urlparse
 
 from .core import SESSION_RE, ToolError, colab_bin, strip_ansi
 
-URL_RE = re.compile(r"https://[^\s\"'<>]+")
+# The CLI also prints other URLs (e.g. "Connecting to https://colab.research.google.com..."); only the one
+# after "Please visit:" is the approval page.
+URL_RE = re.compile(r"Please visit:\s*(https://[^\s\"'<>]+)\s")  # trailing whitespace = the link has fully arrived
 MAX_LIFETIME_SEC = 15 * 60
 START_WAIT_SEC = 90
 FINISH_WAIT_SEC = 150
@@ -93,9 +95,9 @@ class Pending:
                 break
             self.output = (self.output + chunk.decode("utf-8", "replace"))[-20000:]
             if self.url is None:
-                for m in URL_RE.finditer(strip_ansi(self.output).replace("\r", "")):
-                    self.url = m.group(0).rstrip(".,)")
-                    break
+                m = URL_RE.search(strip_ansi(self.output).replace("\r", ""))
+                if m:
+                    self.url = m.group(1).rstrip(".,)")
         self.proc.wait()
         self.done.set()
 
