@@ -8,7 +8,7 @@ It is a thin, safe layer over Google's official **Colab CLI** ([`google-colab-cl
 
 ## Status
 
-- **Tested against a simulated CLI** (118 checks, plus 129 for Drive against a simulated Drive API, 20 for the Drive mount and 17 for local cleanup; `tests/`): a real MCP client talks to the server over stdio and the code that normally runs on the VM is executed for real in a sandbox folder.
+- **Tested against a simulated CLI** (118 checks, plus 129 for Drive against a simulated Drive API, 21 for the Drive mount and 17 for local cleanup; `tests/`): a real MCP client talks to the server over stdio and the code that normally runs on the VM is executed for real in a sandbox folder.
 - **Not yet validated against live Colab.** Sign-in and a first real run are the next step; behaviours the CLI does not document (listed under *Known unknowns*) are flagged below.
 - Linux and macOS only (the Colab CLI does not support Windows).
 
