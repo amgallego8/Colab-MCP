@@ -13,6 +13,7 @@ from . import drive
 from .core import ToolError
 
 USAGE = """colab-cli-mcp-drive login [--own|--shared] | logout | status
+(`login` asks once which Google client to use and remembers it; after that the MCP signs you in by itself when needed.)
 
 Before the first login you need your OWN OAuth client (see README, "Google Drive setup"):
 save the downloaded Desktop-app client JSON as
@@ -122,8 +123,11 @@ def login() -> int:
         print("Google did not grant exactly the drive.file scope (or returned no refresh token). Nothing was saved.")
         return 1
     drive.save_token(creds.to_json())
+    kind = next((k for k, v in drive.available_clients().items() if v == client), None)
+    if kind:
+        drive.set_preference(kind)
     drive.reset()
-    drive.audit("login", ok=True)
+    drive.audit("login", ok=True, client=kind or "")
     print(f"Signed in. Token saved at {drive.token_path()} (readable only by you).")
     print("Never share that file. To remove access: colab-cli-mcp-drive logout")
     return 0
@@ -158,6 +162,7 @@ def status() -> int:
     tp = drive.token_path()
     found = drive.available_clients()
     print("clients     : " + (", ".join(f"{k} ({v})" for k, v in found.items()) if found else "NONE (see README, Google Drive setup)"))
+    print(f"remembered  : {drive.get_preference() or 'nothing yet (run login once)'}")
     print(f"token file  : {tp} ({'found' if tp.exists() else 'not signed in'})")
     if tp.exists():
         try:
@@ -177,7 +182,7 @@ def status() -> int:
 
 def main() -> None:
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
-    fn = {"login": login, "logout": logout, "status": status}.get(cmd)
+    fn = {"login": login, "setup": login, "logout": logout, "status": status}.get(cmd)
     if not fn:
         print(USAGE.format(client=drive.client_path()))
         sys.exit(2)
