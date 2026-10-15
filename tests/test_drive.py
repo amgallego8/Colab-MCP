@@ -383,6 +383,129 @@ def main():
     r = refused(drive.list_notebooks)
     check("a token with broader scopes is refused", r and ("exactly" in r or "packages" in r), str(r))
 
+    # ---- sign-in inside the flow (browser opened by the server; code/token never reach the model)
+    import threading
+    import time as _time
+    from google.auth.exceptions import RefreshError, TransportError
+    from google.oauth2.credentials import Credentials
+
+    tp.unlink()
+    drive.reset()
+    drive._LOGIN.update(state="idle", error="")
+    pref = drive.preference_path()
+    pref.unlink(missing_ok=True)
+    r = refused(drive.list_notebooks)
+    check("with nothing chosen yet, the tools ask for the one-time terminal setup and start nothing", r and "colab-cli-mcp-drive login" in r and drive._LOGIN["state"] == "idle", str(r))
+    drive.set_preference("own")
+    check("the choice is stored privately", stat.S_IMODE(pref.stat().st_mode) == 0o600 and drive.get_preference() == "own")
+    refused(drive.set_preference, "cualquiera")
+    check("only 'own' or 'shared' can be stored", drive.get_preference() == "own")
+    r = refused(drive.list_notebooks)
+    check("a chosen client that is missing is reported", r and "not available" in r, str(r))
+    ownc = tmp / "cfg" / "client_secret.json"
+    ownc.write_text(json.dumps({"installed": {"client_id": "cid", "client_secret": "sec"}}))
+    os.environ.pop("COLAB_MCP_DRIVE_CLIENT", None)
+
+    class FakeCreds:
+        def __init__(self, scopes=(drive.SCOPE,), refresh="r-token"):
+            self.scopes, self.refresh_token = list(scopes), refresh
+
+        def to_json(self):
+            return json.dumps({"token": "access-xyz", "refresh_token": self.refresh_token, "client_id": "cid", "client_secret": "sec",
+                               "token_uri": "https://oauth2.googleapis.com/token", "scopes": self.scopes, "expiry": "2099-01-01T00:00:00Z"})
+
+    gate, started = threading.Event(), []
+
+    def runner(client):
+        started.append(client)
+        gate.wait(5)
+        return runner.creds
+
+    runner.creds = FakeCreds()
+    drive._LOGIN_RUNNER = runner
+    msg = drive.sign_in()
+    check("sign_in starts the browser flow and tells the user what to do", "browser" in msg and "drive.file" in msg and drive._LOGIN["state"] == "pending", msg)
+    check("the message contains no code, token or secret", not any(x in msg for x in ("access-xyz", "r-token", "sec")))
+    msg2 = drive.sign_in()
+    check("a second call while waiting does not open another window", "Waiting" in msg2 and len(started) == 1, msg2)
+    check("tools called while waiting say so instead of failing oddly", "Waiting" in (refused(drive.list_notebooks) or ""))
+    gate.set()
+    for _ in range(50):
+        if drive._LOGIN["state"] != "pending":
+            break
+        _time.sleep(0.1)
+    check("approving saves a 0600 token with exactly the drive.file scope", drive._LOGIN["state"] == "done" and tp.is_file() and stat.S_IMODE(tp.stat().st_mode) == 0o600 and json.loads(tp.read_text())["scopes"] == [drive.SCOPE])
+    check("the flow used the chosen client", started == [ownc])
+    check("afterwards sign_in reports already signed in", drive.sign_in() == "Already signed in to Drive.")
+    check("the audit log records the sign-in without secrets", "in-flow" in drive.audit_path().read_text() and "access-xyz" not in drive.audit_path().read_text() and "r-token" not in drive.audit_path().read_text())
+
+    # wrong scope / no refresh token: nothing is saved, the next call retries
+    tp.unlink()
+    drive.reset()
+    drive._LOGIN.update(state="idle", error="")
+    gate.set()
+    runner.creds = FakeCreds(scopes=(drive.SCOPE, "https://www.googleapis.com/auth/drive"))
+    drive.sign_in()
+    for _ in range(50):
+        if drive._LOGIN["state"] != "pending":
+            break
+        _time.sleep(0.1)
+    check("a broader-than-requested grant is rejected and not saved", drive._LOGIN["state"] == "error" and not tp.exists(), drive._LOGIN["error"])
+    runner.creds = FakeCreds(refresh=None)
+    msg = drive.sign_in()
+    check("the next call reports the failed attempt and starts a fresh one", "previous attempt failed" in msg)
+    for _ in range(50):
+        if drive._LOGIN["state"] != "pending":
+            break
+        _time.sleep(0.1)
+    check("a grant without a refresh token is rejected too", drive._LOGIN["state"] == "error" and not tp.exists())
+    drive._LOGIN.update(state="idle", error="")
+    os.environ["COLAB_MCP_DRIVE_MAX_LOGINS_PER_HOUR"] = "0"
+    check("sign-in attempts are rate limited", "Rate limit" in drive.sign_in())
+    os.environ.pop("COLAB_MCP_DRIVE_MAX_LOGINS_PER_HOUR")
+
+    # expired or revoked token: re-sign in; a network problem must NOT discard the token
+    def expired_token():
+        data = json.loads(FakeCreds().to_json())
+        data["expiry"] = "2001-01-01T00:00:00Z"
+        drive.save_token(json.dumps(data))
+        drive.reset()
+
+    orig_refresh = Credentials.refresh
+    expired_token()
+    Credentials.refresh = lambda self, request: (_ for _ in ()).throw(TransportError("offline"))
+    r = refused(drive.list_notebooks)
+    check("a network error keeps the token and does not start a new sign-in", r and "Could not reach Google" in r and tp.exists() and drive._LOGIN["state"] == "idle", str(r))
+    gate.set()
+    runner.creds = FakeCreds()
+    Credentials.refresh = lambda self, request: (_ for _ in ()).throw(RefreshError("invalid_grant"))
+    r = refused(drive.list_notebooks)
+    for _ in range(50):
+        if drive._LOGIN["state"] != "pending":
+            break
+        _time.sleep(0.1)
+    Credentials.refresh = orig_refresh
+    check("an expired/revoked token triggers a new in-flow sign-in", r and "expired" in r and "browser" in r and drive._LOGIN["state"] == "done", str(r))
+    check("the new token is valid (not expired)", json.loads(tp.read_text())["expiry"].startswith("2099"))
+    drive._LOGIN_RUNNER = None
+    drive._LOGIN.update(state="idle", error="")
+    drive.reset()
+    tp.unlink()
+    pref.unlink()
+    ownc.unlink()
+
+    # a network failure is a clean error, not a crash
+    class Offline:
+        def request(self, *a, **k):
+            raise ConnectionError("https://www.googleapis.com/secret-url?token=abc")
+
+    drive._SESSION_FACTORY = lambda: Offline()
+    drive.reset()
+    r = refused(drive.list_projects)
+    check("network failures give a clean message without URLs", r and "Could not reach Google Drive" in r and "secret-url" not in r and "token=" not in r, str(r))
+    drive._SESSION_FACTORY = None
+    drive.reset()
+
     # ---- terminal commands exist and status works
     import subprocess
     p = subprocess.run([sys.executable, "-m", "colab_cli_mcp.drive_cli", "status"], capture_output=True, text=True, cwd=ROOT)
@@ -448,7 +571,7 @@ def main():
     surface = asyncio.run(mcp_surface(tmp))
     drive_tools = {n for n in surface["on"] if n.startswith("drive_")}
     check("Drive tools are absent unless COLAB_MCP_DRIVE=1", not any(n.startswith("drive_") for n in surface["off"]))
-    check("exactly the expected Drive tools when enabled", drive_tools == {"drive_project_create", "drive_project_list", "drive_notebook_create", "drive_notebook_list", "drive_notebook_open", "drive_notebook_save", "drive_notebook_delete"}, str(drive_tools))
+    check("exactly the expected Drive tools when enabled", drive_tools == {"drive_sign_in", "drive_project_create", "drive_project_list", "drive_notebook_create", "drive_notebook_list", "drive_notebook_open", "drive_notebook_save", "drive_notebook_delete"}, str(drive_tools))
     check("unsigned create returns an ERROR text, not a crash", surface["create_unsigned"].startswith("ERROR"), surface["create_unsigned"])
     check("hostile file id is rejected over MCP", surface["bad_id"].startswith("ERROR") and "Invalid file id" in surface["bad_id"], surface["bad_id"])
 

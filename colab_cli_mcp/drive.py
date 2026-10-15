@@ -21,6 +21,7 @@ This module is OPT-IN (COLAB_MCP_DRIVE=1) and deliberately small. The design rul
 import json
 import os
 import re
+import threading
 import time
 import unicodedata
 import uuid
@@ -44,8 +45,14 @@ FILE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,100}$")
 MAX_NOTEBOOK_BYTES = 10 * 1024 * 1024
 FIELDS = "id,name,mimeType,trashed,ownedByMe,parents,appProperties,webViewLink,createdTime,modifiedTime,size"
 
-# Test hook: a callable returning an object with `.request(method, url, **kw)`. Never set in production.
+LOGIN_TIMEOUT_S = 300
+# Test hooks. Never set in production.
+# _SESSION_FACTORY: callable returning an object with `.request(method, url, **kw)`.
+# _LOGIN_RUNNER: callable(client_path) -> credentials, replacing the real browser flow.
 _SESSION_FACTORY = None
+_LOGIN_RUNNER = None
+_LOGIN = {"state": "idle", "error": ""}
+_LOGIN_LOCK = threading.Lock()
 _SESSION = None
 _FOLDER_ID = None
 
@@ -211,6 +218,112 @@ def notebook_bytes(name: str, source: str | None, keep_outputs: bool = False) ->
     return data
 
 
+# ------------------------------------------------------------------ sign-in inside the flow
+# When a Drive tool needs a token, the server itself starts the standard loopback sign-in: it opens the
+# consent page in the user's browser and listens on localhost for Google's answer. The authorization
+# code and the tokens stay inside this process (and the 0600 token file); the model only ever receives
+# the plain-text messages below. Which OAuth client to use (shared or own) is chosen ONCE by the user,
+# in a terminal (`colab-cli-mcp-drive login`, also offered by install.sh); it is never picked silently.
+
+
+def preference_path() -> Path:
+    return config_dir() / "preference.json"
+
+
+def get_preference() -> str | None:
+    try:
+        value = json.loads(preference_path().read_text(encoding="utf-8")).get("client")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return value if value in {"own", "shared"} else None
+
+
+def set_preference(kind: str) -> None:
+    if kind not in {"own", "shared"}:
+        raise ToolError("client must be 'own' or 'shared'.")
+    path = preference_path()
+    _private_dir(path.parent)
+    tmp = path.with_name(path.name + f".{uuid.uuid4().hex[:8]}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"client": kind}, f)
+    os.replace(tmp, path)
+
+
+def chosen_client() -> Path:
+    pref = get_preference()
+    if pref is None:
+        raise ToolError(
+            "Drive is not set up yet. Once, in a terminal (not here), run: colab-cli-mcp-drive login  "
+            "(it asks whether to use the shared or your own Google client, then signs you in)."
+        )
+    found = available_clients()
+    if pref not in found:
+        raise ToolError(f"Your chosen Drive client ('{pref}') is not available any more. In a terminal run: colab-cli-mcp-drive login")
+    return found[pref]
+
+
+def _run_login(client: Path):
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    flow = InstalledAppFlow.from_client_secrets_file(str(client), scopes=[SCOPE])
+    # authorization_prompt_message=None: nothing may be printed, stdout carries the MCP protocol.
+    return flow.run_local_server(
+        host="localhost", port=0, prompt="consent", access_type="offline",
+        open_browser=True, authorization_prompt_message=None, timeout_seconds=LOGIN_TIMEOUT_S,
+    )
+
+
+def _login_worker(client: Path) -> None:
+    try:
+        creds = (_LOGIN_RUNNER or _run_login)(client)
+        if set(getattr(creds, "scopes", None) or []) != {SCOPE} or not getattr(creds, "refresh_token", None):
+            raise ToolError("Google did not grant exactly the drive.file permission, so nothing was saved.")
+        save_token(creds.to_json())
+        reset()
+        audit("login", ok=True, via="in-flow")
+        state, err = "done", ""
+    except ToolError as exc:
+        audit("login", ok=False, via="in-flow", reason=str(exc))
+        state, err = "error", str(exc)
+    except Exception as exc:  # noqa: BLE001 - never let a worker thread die silently
+        audit("login", ok=False, via="in-flow", reason=type(exc).__name__)
+        state, err = "error", f"the sign-in did not complete ({type(exc).__name__}); it may have timed out after {LOGIN_TIMEOUT_S // 60} minutes"
+    with _LOGIN_LOCK:
+        _LOGIN["state"], _LOGIN["error"] = state, err
+
+
+def begin_login() -> str:
+    """Start the browser sign-in in the background (or report on the one in progress). Always returns text for the user."""
+    with _LOGIN_LOCK:
+        state, last_error = _LOGIN["state"], _LOGIN["error"]
+        if state == "pending":
+            return "Waiting for you to approve Drive access in the browser window that opened. Approve it there, then repeat your request."
+        if state == "done":
+            _LOGIN["state"] = "idle"
+            return "Signed in to Drive. Repeat your request."
+        client = chosen_client()  # raises with the one-time terminal instruction when nothing was chosen
+        _rate_limit("login_start", "COLAB_MCP_DRIVE_MAX_LOGINS_PER_HOUR", 6, "sign-in attempts")
+        audit("login_start", ok=True, client=get_preference())
+        _LOGIN["state"], _LOGIN["error"] = "pending", ""
+        threading.Thread(target=_login_worker, args=(client,), daemon=True, name="drive-login").start()
+    note = f"(The previous attempt failed: {safe_text(last_error, 200)}.) " if state == "error" and last_error else ""
+    return (
+        note + "I opened your browser so you can allow Google Drive access. The only permission requested is 'drive.file': "
+        "files created by this tool, nothing else in your Drive. Approve it, wait for the page that says you can close it, "
+        "then repeat your request. If no window opened, run in a terminal: colab-cli-mcp-drive login"
+    )
+
+
+def sign_in() -> str:
+    """Tool entry point: report the state, starting the sign-in when needed."""
+    try:
+        session()
+    except ToolError as exc:
+        return str(exc)  # includes the "approve in your browser" message when a sign-in was just started
+    return "Already signed in to Drive."
+
+
 # ------------------------------------------------------------------ authenticated transport
 
 
@@ -222,7 +335,7 @@ def _real_session():
         raise ToolError("Drive support needs its Google packages: reinstall the project (uv sync, or pip install .).") from None
     tp = token_path()
     if not tp.exists():
-        raise ToolError("Not signed in to Drive. In a terminal (not here) run: colab-cli-mcp-drive login")
+        raise ToolError(begin_login())
     check_private(tp)
     try:
         data = json.loads(tp.read_text(encoding="utf-8"))
@@ -232,10 +345,17 @@ def _real_session():
         raise ToolError("The stored Drive token does not have exactly the drive.file scope; run: colab-cli-mcp-drive logout, then login.")
     creds = Credentials.from_authorized_user_info(data, scopes=[SCOPE])
     if not creds.valid:
+        from google.auth.exceptions import RefreshError
+
         try:
             creds.refresh(Request())
+        except RefreshError:
+            # Expired (apps in "Testing" lose their tokens after 7 days) or revoked: sign in again, in the flow.
+            tp.unlink(missing_ok=True)
+            audit("token_expired", ok=True)
+            raise ToolError("Your Drive sign-in expired or was revoked. " + begin_login()) from None
         except Exception:  # noqa: BLE001
-            raise ToolError("Drive sign-in expired or was revoked. In a terminal run: colab-cli-mcp-drive login") from None
+            raise ToolError("Could not reach Google to refresh the Drive sign-in; check the connection and try again.") from None
         save_token(creds.to_json())
     return AuthorizedSession(creds)
 
@@ -263,8 +383,19 @@ def reset() -> None:
     _SESSION = _FOLDER_ID = None
 
 
+def _send(method: str, path: str, timeout: int, **kw):
+    """One authenticated request; network failures become a clean message instead of a crash."""
+    sess = session()
+    try:
+        return sess.request(method, API + path, timeout=timeout, **kw)
+    except ToolError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - requests/urllib3/ssl raise many types; never echo URLs or headers
+        raise ToolError(f"Could not reach Google Drive ({type(exc).__name__}). Check the connection and try again.") from None
+
+
 def api(method: str, path: str, **kw) -> dict:
-    resp = session().request(method, API + path, timeout=30, **kw)
+    resp = _send(method, path, 30, **kw)
     if resp.status_code >= 400:
         try:
             msg = resp.json().get("error", {}).get("message", "")
@@ -278,7 +409,7 @@ def api(method: str, path: str, **kw) -> dict:
 
 
 def api_bytes(path: str, **kw) -> bytes:
-    resp = session().request("GET", API + path, timeout=60, **kw)
+    resp = _send("GET", path, 60, **kw)
     if resp.status_code >= 400:
         raise ToolError(f"Drive API error {resp.status_code}: could not download the file.")
     return resp.content

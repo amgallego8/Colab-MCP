@@ -8,11 +8,11 @@ It is a thin, safe layer over Google's official **Colab CLI** ([`google-colab-cl
 
 ## Status
 
-- **Tested against a simulated CLI** (92 checks, plus 53 for Drive against a simulated Drive API; `tests/`): a real MCP client talks to the server over stdio and the code that normally runs on the VM is executed for real in a sandbox folder.
+- **Tested against a simulated CLI** (118 checks, plus 129 for Drive against a simulated Drive API and 17 for local cleanup; `tests/`): a real MCP client talks to the server over stdio and the code that normally runs on the VM is executed for real in a sandbox folder.
 - **Not yet validated against live Colab.** Sign-in and a first real run are the next step; behaviours the CLI does not document (listed under *Known unknowns*) are flagged below.
 - Linux and macOS only (the Colab CLI does not support Windows).
 
-## Tools (38 + 3 optional Drive-notebook tools)
+## Tools (40 + 8 optional Drive tools)
 
 | Area | Tools |
 |---|---|
@@ -22,13 +22,14 @@ It is a thin, safe layer over Google's official **Colab CLI** ([`google-colab-cl
 | **Long jobs** | `colab_job_start`, `_status`, `_logs`, `_cancel`, `_list` |
 | **Files** | `colab_upload`, `colab_download`, `colab_upload_dir`, `colab_download_dir`, `colab_ls`, `colab_rm`, `colab_log` |
 | **Drive on the VM** | `colab_drive_status`, `colab_drive_project_dir` (see *Big projects and Drive*) |
+| **Local footprint** | `colab_local_footprint`, `colab_local_cleanup` (see *Where things live*) |
 
 Typical flows:
 
 - **Interactive:** `colab_ensure_session(gpu="T4")` → `colab_notebook_create` → add cells → `colab_notebook_run_cell` one by one (variables persist) → read outputs → `colab_stop`.
 - **Batch:** `colab_upload_dir` → `colab_job_start("python -u train.py")` → poll `colab_job_logs` → `colab_download_dir` → `colab_stop`.
 
-Google Drive create/delete is a separate, opt-in feature (next section). Deliberately **not** included anywhere: sign-in through a tool, `colab auth`, `colab drivemount`, `repl`, `console`, `ssh`, `edit`. They are interactive and cannot work through a tool call.
+Google Drive projects and notebooks are a separate, opt-in feature (below). Deliberately **not** included anywhere: sign-in through a tool, `colab auth`, `colab drivemount`, `repl`, `console`, `ssh`, `edit`. They are interactive and cannot work through a tool call.
 
 ## Security model
 
@@ -52,28 +53,49 @@ Guardrail: the file tools (`colab_upload*`, `colab_download*`, `colab_ls`, `cola
 
 **Residual risk, stated plainly:** once Drive is mounted, *any code that runs on the VM* (`colab_exec`, `colab_run`, jobs, notebook cells) can read and change **all** of your Drive; the path guard only covers this server's file tools, and it cannot see symlinks created on the VM. Mount only when you need it, review the code you run, and stop the session afterwards.
 
-## Google Drive: create and delete Colab notebooks (opt-in)
+## Where things live (and how little stays on your computer)
 
-Off by default. When `COLAB_MCP_DRIVE=1` three more tools appear, and **only** these three:
+| Where | What | Why |
+|---|---|---|
+| **The Colab VM disk** (about 200 GB free observed on a T4 ⚠️ not guaranteed) | Datasets, training, anything heavy | Fast, free, gone when the session stops |
+| **Drive, folder `Colab-MCP/<project>/`** | Notebooks and results that must persist | Survives sessions; the only part of Drive this tool can see |
+| **Your computer** | Almost nothing: a temporary working copy while you edit a notebook | Auto-cleaned (below) |
+
+Local footprint rules (`footprint.py`):
+
+- Transfer zips are removed right after use and swept after 1 hour; saved plots after 2 days (`COLAB_MCP_IMAGE_DAYS`); locally "deleted" notebooks after 7 days (`COLAB_MCP_TRASH_DAYS`, `0` = keep); working copies of Drive notebooks after 24 h (`COLAB_MCP_DRIVE_COPY_HOURS`, `0` = keep) and immediately when you save. The sweep runs when the server starts and on `colab_local_cleanup`.
+- Only files inside `.colab-mcp/` and `.colab-mcp-trash/` are ever removed. Symlinks are not followed. Your own notebooks and data are never touched.
+- Guards before downloads: at least `COLAB_MCP_MIN_FREE_GB` (default 5) must stay free on the disk and the working folder may not exceed `COLAB_MCP_WORKDIR_MAX_GB` (default 20, `0` = no cap). `colab_local_footprint` shows the numbers. Keep big data on the VM or in Drive and download only results.
+
+## Google Drive: projects and notebooks (opt-in)
+
+Off by default. With `COLAB_MCP_DRIVE=1` (the installer sets it when you set Drive up) these tools appear, and **only** these:
 
 | Tool | What it does |
 |---|---|
-| `drive_notebook_create` | Creates a notebook in a Drive folder named `Colab-MCP` (empty starter, or a local `.ipynb` with its outputs stripped) |
-| `drive_notebook_list` | Lists the notebooks *this server* created (needed to find an id) |
+| `drive_sign_in` | Opens a browser window on your computer where *you* click Allow. No code or token ever passes through the chat |
+| `drive_project_create` / `drive_project_list` | One folder per Colab project inside `Colab-MCP`. Folders can be created, never deleted or renamed |
+| `drive_notebook_create` | Creates a notebook (empty starter, or a local `.ipynb` with outputs stripped), optionally inside a project |
+| `drive_notebook_list` | Lists the notebooks *this server* created |
+| `drive_notebook_open` / `drive_notebook_save` | Download a notebook to a temporary local copy, edit it with the `colab_notebook_*` tools, write the content back to the same file. Saving removes the local copy |
 | `drive_notebook_delete` | Moves one of them to the Drive **trash** (never permanent) |
+
+Layout in your Drive: `Colab-MCP/<project>/<notebook>.ipynb`. The Google permission (`drive.file`) only reaches files and folders this app created, so your existing "Colab Notebooks" folder and everything else stay invisible to it.
 
 A skill that keeps the agent to exactly this lives in [`skills/colab-drive-notebooks/SKILL.md`](skills/colab-drive-notebooks/SKILL.md): copy that folder to `~/.claude/skills/` (Claude Code) or add it as a skill in your client.
 
 ### Who is responsible for what
 
-Nobody shares credentials. **Each user creates their own Google Cloud project and OAuth client, signs in themselves in a terminal, and owns the token on their own disk.** This project ships no client ID, no secret and no hosted service. The model never sees a sign-in link, code or token: login is a terminal command, not a tool.
+Nobody shares credentials. **Each user signs in themselves, and the token lives only on their own disk.** You choose once between two OAuth clients (below); this project never sees your token. The model never sees a sign-in link, code or token.
 
 ### Quick start (every user)
 
+`bash install.sh` asks "Set up Drive now?", runs the one-time choice below, and registers the server with the Drive tools enabled. Manually:
+
 ```bash
 git clone https://github.com/amgallego8/Colab-MCP ~/Colab-MCP && cd ~/Colab-MCP
-uv sync                              # installs everything, Drive packages included
-uv run colab-cli-mcp-drive login     # asks how you want to sign in (below)
+uv sync
+uv run colab-cli-mcp-drive login     # asks once how you want to sign in, remembers it, signs you in
 ```
 
 `login` shows a menu:
@@ -81,9 +103,9 @@ uv run colab-cli-mcp-drive login     # asks how you want to sign in (below)
 1. **shared** — sign in with your browser, nothing to set up. It uses the OAuth client shipped in `colab_cli_mcp/shared_client.json`; the owner of that Google project (the maintainer) answers to Google for the app. Available only in builds that ship one (this repository does not yet).
 2. **own** — you create your own Google Cloud project and OAuth client; `login` walks you through it and, when you give it the path of the JSON you downloaded, stores it for you (`0600`). You answer to Google for your project.
 
-The shared client is never used without an explicit choice. Non-interactive use needs `--own` or `--shared`. Sign-in, the `drive.file` scope, the token file and every guardrail are identical in both cases.
+The shared client is never used without an explicit choice (a terminal answer or `--shared`). Your choice is remembered in `~/.config/colab-mcp/drive/preference.json`. From then on, when a Drive tool needs access and there is no valid token (first use, or after the 7-day expiry of apps in *Testing* mode), **the server itself opens the browser consent page** and waits for your click; you then repeat the request. Sign-in, the `drive.file` scope, the token file and every guardrail are identical in both cases.
 
-Then add `-e COLAB_MCP_DRIVE=1` to the MCP registration (Claude Desktop: `"COLAB_MCP_DRIVE": "1"` in `env`), and leave **per-call approval on** for `drive_notebook_delete` in your MCP client — that prompt is the real human confirmation; the server cannot force it. `uv run colab-cli-mcp-drive status` shows what is configured.
+Then leave **per-call approval on** for `drive_notebook_delete` in your MCP client — that prompt is the real human confirmation; the server cannot force it. `uv run colab-cli-mcp-drive status` shows what is configured.
 
 To leave: `colab-cli-mcp-drive logout` (deletes the token and revokes it at Google), and remove the app at <https://myaccount.google.com/permissions> if revocation could not be confirmed.
 
@@ -104,10 +126,10 @@ Create the client as above (ideally in a dedicated Google account and project), 
 | Scope `drive.file` only | The token can only reach files this OAuth client created. It cannot read or delete the rest of your Drive, even if everything below failed. Google classifies this scope as non-sensitive. |
 | Your own OAuth client | Another user's or a vendor's client cannot touch your files, and you can revoke the whole client from your own project. |
 | Token handling | `0600` file, refused if group/world-readable, refused if it has any scope other than `drive.file`. Never returned by any tool. Separate from the Colab CLI's token (which has broader scopes). |
-| Tool surface | Create / list / trash. No permanent delete, no sharing, no permissions, no update, no content reads, no free-form queries or ids. A test asserts that no `DELETE` request and no permissions/export/copy endpoint is ever used. |
-| Delete guards | The file must carry this server's marker, be a Colab notebook, be owned by you, sit directly in the app folder, not already be trashed, and the caller must retype its exact name. |
-| Limits and trace | At most 20 creations and 5 deletions per hour (`COLAB_MCP_DRIVE_MAX_CREATES_PER_HOUR` / `_MAX_DELETES_PER_HOUR`); append-only audit log (`audit.log`, `0600`) that never stores content. |
-| Content hygiene | Uploaded notebooks lose their outputs, and an upload is refused if it contains a value from your secrets file. Names read back from Drive have control and bidi characters stripped and are labelled as data. |
+| Tool surface | Create folders; create / list / open / save / trash notebooks this server created. No permanent delete, no folder delete, no sharing, no permissions, no reading of other files, no free-form queries or ids. A test asserts that no `DELETE` request and no permissions/export/copy endpoint is ever used. |
+| File guards (open, save, delete) | The file must carry this server's marker, be a Colab notebook, be owned by you, sit directly in the app folder or one of its project folders, and not be trashed. Delete also needs its exact name retyped. Save changes content only: never name, place or sharing. |
+| Limits and trace | Per hour: 20 notebook creations, 10 project folders, 60 saves, 5 deletions, 6 sign-in attempts (`COLAB_MCP_DRIVE_MAX_CREATES_PER_HOUR`, `_MAX_PROJECTS_PER_HOUR`, `_MAX_SAVES_PER_HOUR`, `_MAX_DELETES_PER_HOUR`, `_MAX_LOGINS_PER_HOUR`); append-only audit log (`audit.log`, `0600`) that never stores content. |
+| Content hygiene | Notebooks uploaded from a file lose their outputs; saves keep outputs (turn off with `keep_outputs=False`). Any upload or save is refused if it contains a value from your secrets file. Names read back from Drive have control and bidi characters stripped and are labelled as data. |
 
 **Residual risks, stated plainly.** "Completely secure" is not a claim anyone can make; this is what remains:
 
@@ -116,9 +138,10 @@ Create the client as above (ideally in a dedicated Google account and project), 
 - Anyone who can read your user account's files can use your token until you log out. Disk encryption and a locked account are on you.
 - Notebooks you create can contain code that will run later in Colab with your account; review what you open.
 - In *Testing* mode Google expires refresh tokens after 7 days for external apps, so you may need to log in again weekly.
+- If a Drive folder named `Colab-MCP` is also created by code running on a Drive-mounted VM, Drive can end up with two folders of that name that this tool treats separately (⚠️ not verified). Prefer one route per project.
 - Not yet run against live Google Drive (see *Known unknowns*).
 
-Env: `COLAB_MCP_DRIVE` (enable), `COLAB_MCP_DRIVE_DIR` (default `~/.config/colab-mcp/drive`), `COLAB_MCP_DRIVE_CLIENT`, `COLAB_MCP_DRIVE_TOKEN`, `COLAB_MCP_DRIVE_AUDIT`, `COLAB_MCP_DRIVE_FOLDER` (default `Colab-MCP`).
+Env: `COLAB_MCP_DRIVE` (enable), `COLAB_MCP_DRIVE_COPY_HOURS`, `COLAB_MCP_DRIVE_DIR` (default `~/.config/colab-mcp/drive`), `COLAB_MCP_DRIVE_CLIENT`, `COLAB_MCP_DRIVE_TOKEN`, `COLAB_MCP_DRIVE_AUDIT`, `COLAB_MCP_DRIVE_FOLDER` (default `Colab-MCP`).
 
 ## Install
 
@@ -183,6 +206,9 @@ Every person who uses it repeats these steps with **their own Google account**: 
 | `COLAB_MCP_MAX_UPLOAD_MB` | `100` | Per-file/zip upload cap (the CLI sends a file in one request) |
 | `COLAB_MCP_MAX_DOWNLOAD_MB` | `1024` | Cap for unpacked directory downloads |
 | `COLAB_BIN` | `colab` | Path to the CLI executable |
+| `COLAB_MCP_MIN_FREE_GB` | `5` | Free disk that must remain after a download |
+| `COLAB_MCP_WORKDIR_MAX_GB` | `20` | Budget for the working folder (`0` = no cap) |
+| `COLAB_MCP_IMAGE_DAYS` / `COLAB_MCP_TRASH_DAYS` / `COLAB_MCP_DRIVE_COPY_HOURS` | `2` / `7` / `24` | Age after which saved plots, locally trashed notebooks and Drive working copies are swept (`0` = keep trash/copies) |
 | `COLAB_MCP_DRIVE_PROJECTS` | `Colab-MCP` | The only Drive folder (under MyDrive) the file tools may use when Drive is mounted on the VM |
 
 ## How notebooks work
@@ -209,6 +235,7 @@ These come from reading the CLI's source and docs, not from running it:
 pip install "mcp<2" nbformat google-auth google-auth-oauthlib requests
 python tests/test_server.py   # the Colab tools, with a simulated CLI
 python tests/test_drive.py    # the Drive tools, with a simulated Drive API
+python tests/test_footprint.py # local cleanup and disk guards
 ```
 
 The SDK pin `mcp<2` is intentional: 2.x renamed `FastMCP` to `MCPServer`.
@@ -230,5 +257,5 @@ Servidor MCP para que un agente use **Google Colab de punta a punta**: crear y d
 - **Estado:** probado con un CLI simulado (92 comprobaciones). **Falta validar con Colab real** (ver «Known unknowns»).
 - **Seguridad:** las rutas locales quedan confinadas a `COLAB_MCP_WORKDIR`; las claves viven en un archivo local y nunca se devuelven al modelo; no hay shell; los borrados de cuadernos van a una papelera recuperable.
 - **Instalación:** cada persona repite los pasos de «Install» con su propia cuenta de Google. El token de sesión es personal.
-- **Google Drive (opcional):** crear y borrar cuadernos de Colab en tu Drive, solo eso. Cada usuario crea su propio proyecto y cliente OAuth, inicia sesión él mismo en una terminal y es responsable de su token; el permiso es `drive.file` (solo archivos creados por esta herramienta) y el borrado va a la papelera. Hay una skill (`skills/colab-drive-notebooks`) que limita al agente a eso. Ver «Google Drive» y el modelo de amenazas, con sus riesgos residuales. Aún sin probar contra Drive real.
+- **Google Drive (opcional):** carpetas de proyecto y cuadernos de Colab en `Colab-MCP/<proyecto>/` de tu Drive (crear, abrir, guardar, borrar a la papelera), nada más. Eliges una sola vez entre el cliente compartido y el tuyo; después el propio servidor abre el navegador cuando haga falta y tú solo pulsas «Permitir» (el código y el token nunca pasan por el chat). El permiso es `drive.file`: solo ve lo que esta herramienta crea. Tu computador queda casi vacío: los temporales se limpian solos y lo pesado va al disco de la VM o a Drive. Hay una skill (`skills/colab-drive-notebooks`) que limita al agente a eso. Ver «Google Drive» y el modelo de amenazas, con sus riesgos residuales. Aún sin probar contra Drive real.
 - **Costo:** lo que ejecutes consume tus unidades de cómputo de Colab. Detén las sesiones que no uses.

@@ -537,6 +537,13 @@ def colab_local_cleanup() -> str:
 if drive.enabled():
 
     @_tool
+    def drive_sign_in() -> str:
+        """Connect Google Drive. If already connected, says so. Otherwise opens a browser window on the user's computer
+        where THEY approve access (only files this tool creates). Never asks for, shows or handles any code or token:
+        the user just clicks Allow. Then repeat the Drive request."""
+        return drive.sign_in()
+
+    @_tool
     def drive_project_create(name: str) -> str:
         """Create (or find) a project folder for a Colab project inside the Drive folder 'Colab-MCP'.
         Name: letters, digits, '-' and '_'. Folders can only be created, never deleted or renamed by this server."""
