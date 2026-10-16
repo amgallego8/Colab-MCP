@@ -1,0 +1,35 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.amgallego8/colab-mcp",
+  "title": "Colab-MCP (unofficial)",
+  "description": "Unofficial MCP server for Google Colab: runtimes, code, long jobs, files and notebooks.",
+  "repository": {
+    "url": "https://github.com/amgallego8/Colab-MCP",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "colab-cli-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "COLAB_MCP_WORKDIR",
+          "description": "The only local folder the server reads and writes. Defaults to the current directory.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "COLAB_MCP_DRIVE",
+          "description": "Set to 1 to enable the optional Google Drive tools (they need a one-time sign-in, see the README).",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
