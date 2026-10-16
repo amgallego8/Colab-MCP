@@ -1,20 +1,41 @@
 [project]
 name = "colab-cli-mcp"
 version = "0.1.0"
-description = "Servidor MCP que envuelve el Colab CLI oficial (google-colab-cli) para ejecutar código en GPU desde un agente."
+description = "MCP server that wraps the official Google Colab CLI so an AI agent can use Colab end to end: runtimes, code, long jobs, files and notebooks."
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "amgallego8", email = "info@angelgallego.com" }]
 requires-python = ">=3.10"
+keywords = ["mcp", "model-context-protocol", "google-colab", "colab", "ai-agents", "claude", "jupyter"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development",
+]
 # El SDK 2.x renombró FastMCP a MCPServer; este servidor usa la API 1.x.
 dependencies = ["mcp>=1.2,<2", "nbformat>=5.9", "google-auth>=2.20", "google-auth-oauthlib>=1.0", "requests>=2.31"]
+
+[project.urls]
+Homepage = "https://github.com/amgallego8/Colab-MCP"
+Repository = "https://github.com/amgallego8/Colab-MCP"
+Issues = "https://github.com/amgallego8/Colab-MCP/issues"
 
 [project.scripts]
 colab-cli-mcp = "colab_cli_mcp.server:main"
 colab-cli-mcp-drive = "colab_cli_mcp.drive_cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["colab_cli_mcp"]
+
+# The source archive keeps the code, the tests and the legal files; the installer script,
+# the helper scripts and dotfiles stay in the repository only.
+[tool.hatch.build.targets.sdist]
+include = ["colab_cli_mcp", "tests", "README.md", "LICENSE", "TERMS.md", "pyproject.toml"]
