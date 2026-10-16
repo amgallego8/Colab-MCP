@@ -1,5 +1,7 @@
 # Colab-MCP
 
+<!-- mcp-name: io.github.amgallego8/colab-mcp -->
+
 An MCP server that lets an AI agent (Claude, or any MCP client) **use Google Colab end to end**: create and stop GPU/TPU runtimes, run code, work in notebooks cell by cell, launch long background jobs, and move files and folders in and out of the VM.
 
 It is a thin, safe layer over Google's official **Colab CLI** ([`google-colab-cli`](https://github.com/googlecolab/google-colab-cli)). It does not reimplement Colab and does not depend on a browser tab.
@@ -9,7 +11,8 @@ It is a thin, safe layer over Google's official **Colab CLI** ([`google-colab-cl
 ## Status
 
 - **Tested against a simulated CLI** (118 checks, plus 129 for Drive against a simulated Drive API, 28 for the Drive mount and 17 for local cleanup; `tests/`): a real MCP client talks to the server over stdio and the code that normally runs on the VM is executed for real in a sandbox folder.
-- **Not yet validated against live Colab.** Sign-in and a first real run are the next step; behaviours the CLI does not document (listed under *Known unknowns*) are flagged below.
+- **Validated live once.** On a real Colab session (macOS, Claude as the client): creating a runtime, running code, a long background job with log polling, mounting Drive from the chat (below) and stopping the session, with one real batch workload (10 items, 0 errors). That is a single run, not a benchmark.
+- **Not yet validated live:** the Google Drive API tools (`drive_*`), notebook execution cell by cell, folder uploads and downloads, and the behaviours listed under *Known unknowns*. Other MCP clients (Cursor, Codex, Windsurf) and Linux are untested.
 - Linux and macOS only (the Colab CLI does not support Windows).
 
 ## Tools (42 + 8 optional Drive tools)
@@ -83,7 +86,7 @@ Off by default. With `COLAB_MCP_DRIVE=1` (the installer sets it when you set Dri
 
 Layout in your Drive: `Colab-MCP/<project>/<notebook>.ipynb`. The Google permission (`drive.file`) only reaches files and folders this app created, so your existing "Colab Notebooks" folder and everything else stay invisible to it.
 
-A skill that keeps the agent to exactly this lives in [`skills/colab-drive-notebooks/SKILL.md`](skills/colab-drive-notebooks/SKILL.md): copy that folder to `~/.claude/skills/` (Claude Code) or add it as a skill in your client.
+A skill that keeps the agent to exactly this lives in [`skills/colab-drive-notebooks/SKILL.md`](https://github.com/amgallego8/Colab-MCP/blob/main/skills/colab-drive-notebooks/SKILL.md): copy that folder to `~/.claude/skills/` (Claude Code) or add it as a skill in your client.
 
 ### Who is responsible for what
 
@@ -117,7 +120,7 @@ To leave: `colab-cli-mcp-drive logout` (deletes the token and revokes it at Goog
 
 ### For the maintainer: publishing a shared client
 
-Create the client as above (ideally in a dedicated Google account and project), then place the JSON at `colab_cli_mcp/shared_client.json` and commit it on purpose (`git add -f`; the file is git-ignored by default). Desktop-app client secrets are not confidential by design, but the project, its consent screen (support email, privacy policy link) and any Google verification requirements become yours. See [TERMS.md](TERMS.md).
+Create the client as above (ideally in a dedicated Google account and project), then place the JSON at `colab_cli_mcp/shared_client.json` and commit it on purpose (`git add -f`; the file is git-ignored by default). Desktop-app client secrets are not confidential by design, but the project, its consent screen (support email, privacy policy link) and any Google verification requirements become yours. See [TERMS.md](https://github.com/amgallego8/Colab-MCP/blob/main/TERMS.md).
 
 ### Threat model (what this does and does not protect)
 
@@ -145,7 +148,19 @@ Env: `COLAB_MCP_DRIVE` (enable), `COLAB_MCP_DRIVE_COPY_HOURS`, `COLAB_MCP_DRIVE_
 
 ## Install
 
-**Fastest:** `bash install.sh` (macOS/Linux). It asks before installing anything, signs you in to Colab, and registers the server with Claude Code (or prints the Claude Desktop config). The manual steps are below.
+**From PyPI** (needs [uv](https://docs.astral.sh/uv/); the official Colab CLI must be installed and signed in first):
+
+```bash
+uv tool install google-colab-cli
+colab sessions        # sign in ONCE (open the link, paste the code)
+
+# Claude Code
+claude mcp add colab-cli -e COLAB_MCP_WORKDIR="$HOME/colab-work" -- uvx colab-cli-mcp
+```
+
+For Claude Desktop use `"command": "uvx"` and `"args": ["colab-cli-mcp"]` in `claude_desktop_config.json`. For the optional Drive tools add `-e COLAB_MCP_DRIVE=1` and sign in once with `uvx --from colab-cli-mcp colab-cli-mcp-drive login`.
+
+**From source, fastest:** `bash install.sh` (macOS/Linux). It asks before installing anything, signs you in to Colab, and registers the server with Claude Code (or prints the Claude Desktop config). The manual steps are below.
 
 ```bash
 # 1. uv and the official CLI
@@ -219,7 +234,7 @@ Notebooks are ordinary `.ipynb` files inside the working directory, edited local
 
 ## Known unknowns (to confirm against live Colab)
 
-These come from reading the CLI's source and docs, not from running it:
+These come from reading the CLI's source and docs. The live run described under *Status* did not cover them:
 
 - Kernel variables persisting across `exec` calls (the source reuses the same kernel id, so it should).
 - Cell success/failure detection relies on `get_ipython().run_cell` being available in the Colab kernel.
@@ -243,11 +258,11 @@ The SDK pin `mcp<2` is intentional: 2.x renamed `FastMCP` to `MCPServer`.
 
 ## Terms of use and privacy
 
-See [TERMS.md](TERMS.md): no server and no data collection by the maintainer, what is stored locally, user responsibilities, who answers to Google under each sign-in option, and the no-warranty clause.
+See [TERMS.md](https://github.com/amgallego8/Colab-MCP/blob/main/TERMS.md): no server and no data collection by the maintainer, what is stored locally, user responsibilities, who answers to Google under each sign-in option, and the no-warranty clause.
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE). Copyright 2026 the Colab-MCP contributors (`amgallego8`). The official Colab CLI this project wraps is a separate work, also Apache-2.0, and is not included here.
+Apache License 2.0 — see [LICENSE](https://github.com/amgallego8/Colab-MCP/blob/main/LICENSE). Copyright 2026 the Colab-MCP contributors (`amgallego8`). The official Colab CLI this project wraps is a separate work, also Apache-2.0, and is not included here.
 
 ---
 
@@ -255,8 +270,8 @@ Apache License 2.0 — see [LICENSE](LICENSE). Copyright 2026 the Colab-MCP cont
 
 Servidor MCP para que un agente use **Google Colab de punta a punta**: crear y detener runtimes con GPU/TPU, ejecutar código, trabajar en cuadernos celda por celda, lanzar trabajos largos en segundo plano y mover archivos y carpetas hacia y desde la VM. Envuelve el **Colab CLI oficial** de Google.
 
-- **Estado:** probado con un CLI simulado (92 comprobaciones). **Falta validar con Colab real** (ver «Known unknowns»).
+- **Estado:** probado con un CLI simulado (292 comprobaciones: 118 + 129 + 28 + 17). Validado una vez en vivo en una sesión real de Colab (macOS y Claude): crear runtime, ejecutar código, un trabajo largo con logs y montar Drive desde el chat. **Sin validar en vivo:** las herramientas `drive_*`, cuadernos celda por celda, carpetas, otros clientes (ver «Known unknowns»).
 - **Seguridad:** las rutas locales quedan confinadas a `COLAB_MCP_WORKDIR`; las claves viven en un archivo local y nunca se devuelven al modelo; no hay shell; los borrados de cuadernos van a una papelera recuperable.
-- **Instalación:** cada persona repite los pasos de «Install» con su propia cuenta de Google. El token de sesión es personal.
-- **Google Drive (opcional):** carpetas de proyecto y cuadernos de Colab en `Colab-MCP/<proyecto>/` de tu Drive (crear, abrir, guardar, borrar a la papelera), nada más. Eliges una sola vez entre el cliente compartido y el tuyo; después el propio servidor abre el navegador cuando haga falta y tú solo pulsas «Permitir» (el código y el token nunca pasan por el chat). El permiso es `drive.file`: solo ve lo que esta herramienta crea. Tu computador queda casi vacío: los temporales se limpian solos y lo pesado va al disco de la VM o a Drive. Hay una skill (`skills/colab-drive-notebooks`) que limita al agente a eso. Ver «Google Drive» y el modelo de amenazas, con sus riesgos residuales. Aún sin probar contra Drive real.
+- **Instalación:** desde PyPI con `uvx colab-cli-mcp` (o desde el código con `install.sh`); cada persona repite los pasos de «Install» con su propia cuenta de Google. El token de sesión es personal.
+- **Google Drive (opcional):** carpetas de proyecto y cuadernos de Colab en `Colab-MCP/<proyecto>/` de tu Drive (crear, abrir, guardar, borrar a la papelera), nada más. Creas una sola vez tu propio cliente de Google (todavía no se publica un cliente compartido); después el propio servidor abre el navegador cuando haga falta y tú solo pulsas «Permitir» (el código y el token nunca pasan por el chat). El permiso es `drive.file`: solo ve lo que esta herramienta crea. Tu computador queda casi vacío: los temporales se limpian solos y lo pesado va al disco de la VM o a Drive. Hay una skill (`skills/colab-drive-notebooks`) que limita al agente a eso. Ver «Google Drive» y el modelo de amenazas, con sus riesgos residuales. Aún sin probar contra la API de Drive real.
 - **Costo:** lo que ejecutes consume tus unidades de cómputo de Colab. Detén las sesiones que no uses.
