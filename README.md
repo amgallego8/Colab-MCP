@@ -6,12 +6,27 @@ An MCP server that lets an AI agent (Claude, or any MCP client) **use Google Col
 
 It is a thin, safe layer over Google's official **Colab CLI** ([`google-colab-cli`](https://github.com/googlecolab/google-colab-cli)). It does not reimplement Colab and does not depend on a browser tab.
 
+[![PyPI](https://img.shields.io/pypi/v/colab-cli-mcp)](https://pypi.org/project/colab-cli-mcp/) [![License](https://img.shields.io/pypi/l/colab-cli-mcp)](https://github.com/amgallego8/Colab-MCP/blob/main/LICENSE)
+
 > 🇪🇸 **Resumen en español al final de este archivo.**
+
+## Quick start
+
+You need [uv](https://docs.astral.sh/uv/) and the official Colab CLI, signed in once (macOS or Linux):
+
+```bash
+uv tool install google-colab-cli
+colab sessions        # sign in ONCE (open the link, paste the code)
+claude mcp add colab-cli -e COLAB_MCP_WORKDIR="$HOME/colab-work" -- uvx colab-cli-mcp
+```
+
+That registers the server in Claude Code, and `uvx` downloads it from [PyPI](https://pypi.org/project/colab-cli-mcp/) the first time. For Claude Desktop, other clients, secrets and the optional Drive tools, see [Install](#install).
 
 ## Status
 
 - **Tested against a simulated CLI** (118 checks, plus 129 for Drive against a simulated Drive API, 28 for the Drive mount and 17 for local cleanup; `tests/`): a real MCP client talks to the server over stdio and the code that normally runs on the VM is executed for real in a sandbox folder.
 - **Validated live once.** On a real Colab session (macOS, Claude as the client): creating a runtime, running code, a long background job with log polling, mounting Drive from the chat (below) and stopping the session, with one real batch workload (10 items, 0 errors). That is a single run, not a benchmark.
+- **Published on PyPI** as `colab-cli-mcp` 0.1.0. The published package was installed in a clean environment (pip, and `uvx`) and listed its 42 tools over stdio. That check ran on Linux; use of the `uvx` route with Claude on macOS has not been checked yet.
 - **Not yet validated live:** the Google Drive API tools (`drive_*`), notebook execution cell by cell, folder uploads and downloads, and the behaviours listed under *Known unknowns*. Other MCP clients (Cursor, Codex, Windsurf) and Linux are untested.
 - Linux and macOS only (the Colab CLI does not support Windows).
 
@@ -94,12 +109,19 @@ Nobody shares credentials. **Each user signs in themselves, and the token lives 
 
 ### Quick start (every user)
 
-`bash install.sh` asks "Set up Drive now?", runs the one-time choice below, and registers the server with the Drive tools enabled. Manually:
+From PyPI:
+
+```bash
+uvx --from colab-cli-mcp colab-cli-mcp-drive login     # asks once how you want to sign in, remembers it, signs you in
+claude mcp add colab-cli -e COLAB_MCP_WORKDIR="$HOME/colab-work" -e COLAB_MCP_DRIVE=1 -- uvx colab-cli-mcp
+```
+
+From a clone of this repository, `bash install.sh` asks "Set up Drive now?", runs the one-time choice below, and registers the server with the Drive tools enabled. Manually:
 
 ```bash
 git clone https://github.com/amgallego8/Colab-MCP ~/Colab-MCP && cd ~/Colab-MCP
 uv sync
-uv run colab-cli-mcp-drive login     # asks once how you want to sign in, remembers it, signs you in
+uv run colab-cli-mcp-drive login     # same login, run from the clone
 ```
 
 `login` walks you through creating **your own** Google Cloud "Desktop app" client (about 10 minutes, once, free; steps below). When you give it the path of the JSON you downloaded it stores it for you (`0600`). You answer to Google for your project. After that, signing in is just: a link opens in your browser, you click Allow, done. There is no code to paste.
@@ -108,7 +130,7 @@ uv run colab-cli-mcp-drive login     # asks once how you want to sign in, rememb
 
 The shared client is never used without an explicit choice (a terminal answer or `--shared`). Your choice is remembered in `~/.config/colab-mcp/drive/preference.json`. From then on, when a Drive tool needs access and there is no valid token (first use, or after the 7-day expiry of apps in *Testing* mode), **the server itself opens the browser consent page** and waits for your click; you then repeat the request. Sign-in, the `drive.file` scope, the token file and every guardrail are identical in both cases.
 
-Then leave **per-call approval on** for `drive_notebook_delete` in your MCP client — that prompt is the real human confirmation; the server cannot force it. `uv run colab-cli-mcp-drive status` shows what is configured.
+Then leave **per-call approval on** for `drive_notebook_delete` in your MCP client — that prompt is the real human confirmation; the server cannot force it. `uvx --from colab-cli-mcp colab-cli-mcp-drive status` (or `uv run colab-cli-mcp-drive status` from a clone) shows what is configured.
 
 To leave: `colab-cli-mcp-drive logout` (deletes the token and revokes it at Google), and remove the app at <https://myaccount.google.com/permissions> if revocation could not be confirmed.
 
@@ -148,19 +170,52 @@ Env: `COLAB_MCP_DRIVE` (enable), `COLAB_MCP_DRIVE_COPY_HOURS`, `COLAB_MCP_DRIVE_
 
 ## Install
 
-**From PyPI** (needs [uv](https://docs.astral.sh/uv/); the official Colab CLI must be installed and signed in first):
+### From PyPI (recommended)
+
+Needs [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`). The official Colab CLI must be installed and signed in first:
 
 ```bash
 uv tool install google-colab-cli
 colab sessions        # sign in ONCE (open the link, paste the code)
+```
 
-# Claude Code
+**Claude Code:**
+
+```bash
 claude mcp add colab-cli -e COLAB_MCP_WORKDIR="$HOME/colab-work" -- uvx colab-cli-mcp
 ```
 
-For Claude Desktop use `"command": "uvx"` and `"args": ["colab-cli-mcp"]` in `claude_desktop_config.json`. For the optional Drive tools add `-e COLAB_MCP_DRIVE=1` and sign in once with `uvx --from colab-cli-mcp colab-cli-mcp-drive login`.
+**Claude Desktop** (`claude_desktop_config.json`; use the full path to `uvx` if the app cannot find it, see `which uvx`):
 
-**From source, fastest:** `bash install.sh` (macOS/Linux). It asks before installing anything, signs you in to Colab, and registers the server with Claude Code (or prints the Claude Desktop config). The manual steps are below.
+```json
+{
+  "mcpServers": {
+    "colab-cli": {
+      "command": "uvx",
+      "args": ["colab-cli-mcp"],
+      "env": { "COLAB_MCP_WORKDIR": "/Users/YOU/colab-work" }
+    }
+  }
+}
+```
+
+**Other MCP clients:** any client that can start a stdio server can run `uvx colab-cli-mcp` (untested, see *Status*).
+
+**Optional secrets file** (outside any repository, readable only by you) and the Drive tools:
+
+```bash
+mkdir -p ~/.config/colab-mcp
+printf 'OPENROUTER_API_KEY=your-key-here\n' > ~/.config/colab-mcp/secrets.env
+chmod 600 ~/.config/colab-mcp/secrets.env
+```
+
+Add `-e COLAB_MCP_ENV_FILE="$HOME/.config/colab-mcp/secrets.env"` to the command above (or the same key under `env` in the JSON). For the optional Drive tools add `-e COLAB_MCP_DRIVE=1` and sign in once as described in [Google Drive](#google-drive-projects-and-notebooks-opt-in).
+
+Every person who uses it repeats these steps with **their own Google account**: the sign-in token is personal and must not be shared.
+
+### From source (to modify the code)
+
+`bash install.sh` (macOS/Linux) from a clone asks before installing anything, signs you in to Colab, and registers the server with Claude Code (or prints the Claude Desktop config). The manual steps are below.
 
 ```bash
 # 1. uv and the official CLI
